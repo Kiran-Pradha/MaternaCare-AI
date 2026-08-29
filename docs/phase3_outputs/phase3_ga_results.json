@@ -1,0 +1,72 @@
+{
+  "ga_random_forest": {
+    "accuracy": 0.8522167487684729,
+    "f1_weighted": 0.8514397128335885,
+    "high_risk_recall": 0.9636363636363636,
+    "best_params": {
+      "n_estimators": 121,
+      "max_depth": 15,
+      "min_samples_split": 2,
+      "min_samples_leaf": 1,
+      "max_features": "sqrt",
+      "class_weight": null,
+      "criterion": "entropy",
+      "random_state": 42
+    }
+  },
+  "ga_xgboost": {
+    "accuracy": 0.8522167487684729,
+    "f1_weighted": 0.8510484404942836,
+    "high_risk_recall": 0.9636363636363636,
+    "best_params": {
+      "n_estimators": 393,
+      "max_depth": 12,
+      "learning_rate": 0.2289,
+      "subsample": 0.812,
+      "colsample_bytree": 0.852,
+      "reg_alpha": 0.19,
+      "reg_lambda": 1.318,
+      "min_child_weight": 1,
+      "eval_metric": "mlogloss",
+      "random_state": 42
+    }
+  },
+  "comparison": {
+    "random_forest": {
+      "baseline_accuracy": 0.8522167487684729,
+      "ga_accuracy": 0.8522167487684729,
+      "accuracy_improvement": 0.0,
+      "baseline_high_risk_recall": 0.9636363636363636,
+      "ga_high_risk_recall": 0.9636363636363636
+    },
+    "xgboost": {
+      "baseline_accuracy": 0.8522167487684729,
+      "ga_accuracy": 0.8522167487684729,
+      "accuracy_improvement": 0.0,
+      "baseline_high_risk_recall": 0.9636363636363636,
+      "ga_high_risk_recall": 0.9636363636363636
+    }
+  },
+  "cv_comparison": {
+    "random_forest": {
+      "baseline_cv_mean": 0.8461551968004684,
+      "baseline_cv_std": 0.022941612245034455,
+      "ga_cv_mean": 0.8469443496073746,
+      "ga_cv_std": 0.024916723201302806,
+      "mean_improvement": 0.0007891528069062792,
+      "t_statistic": 0.5174534536798937,
+      "p_value": 0.6095764689855335,
+      "significant": false
+    },
+    "xgboost": {
+      "baseline_cv_mean": 0.8477344778812856,
+      "baseline_cv_std": 0.023539831839788125,
+      "ga_cv_mean": 0.8499029410330197,
+      "ga_cv_std": 0.028806991858562402,
+      "mean_improvement": 0.0021684631517340236,
+      "t_statistic": 0.9988059093858777,
+      "p_value": 0.32785325668889864,
+      "significant": false
+    }
+  }
+}

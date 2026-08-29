@@ -1,0 +1,29 @@
+# Core data + modeling
+pandas
+numpy
+scikit-learn
+xgboost
+matplotlib
+seaborn
+
+# Genetic Algorithm optimization
+deap
+
+# Explainability
+shap
+
+# Class imbalance handling (maternal risk classes are often imbalanced)
+imbalanced-learn
+
+# Voice interface
+vosk
+gTTS
+SpeechRecognition
+
+# Demo app
+streamlit
+
+# Utilities
+jupyter
+joblib
+python-dotenv

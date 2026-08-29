@@ -1,0 +1,33 @@
+# Environments
+venv/
+env/
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# Data (raw datasets can be large / shouldn't be versioned)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# Models
+models/*.pkl
+models/*.joblib
+models/*.h5
+
+# Secrets
+.env
+kaggle.json
+
+# OS/Editor
+.DS_Store
+.vscode/
+*.swp
+
+# Outputs
+docs/eda_outputs/

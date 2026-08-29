@@ -1,0 +1,28 @@
+{
+  "pattern_classifier": {
+    "accuracy": 0.9408866995073891
+  },
+  "risk_classifier_comparison": {
+    "single_split": {
+      "with_trend_features": {
+        "accuracy": 0.7438423645320197,
+        "f1_weighted": 0.739102861466714
+      },
+      "latest_vitals_only": {
+        "accuracy": 0.8522167487684729,
+        "f1_weighted": 0.8510484404942836
+      },
+      "improvement": -0.10837438423645318
+    },
+    "cross_validated": {
+      "trend_cv_mean": 0.7183368287567673,
+      "trend_cv_std": 0.027047871922479497,
+      "latest_cv_mean": 0.8475384090133151,
+      "latest_cv_std": 0.025638434867879655,
+      "mean_improvement": -0.12920158025654782,
+      "t_statistic": -19.902696784813287,
+      "p_value": 2.0006270838833496e-16,
+      "significant": true
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "exact_duplicates": {
+    "total_records": 1014,
+    "conflicting_feature_combinations": 35,
+    "rows_involved_in_conflicts": 215,
+    "pct_involved": 21.203155818540434,
+    "irreducible_errors": 78,
+    "theoretical_max_accuracy": 0.9230769230769231
+  },
+  "near_duplicates": {
+    "conflicting_near_duplicate_groups": 41,
+    "rows_involved": 247,
+    "pct_involved": 24.358974358974358
+  },
+  "pca_overlap": {
+    "pca_variance_explained": 0.6253790965004297
+  }
+}
