@@ -37,6 +37,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.decomposition import PCA
+from scipy import stats
 from deap import base, creator, tools
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -157,11 +158,12 @@ def explore_k(X_scaled):
 # Step 2: Plain K-Means baseline
 # =========================================================
 
-def run_plain_kmeans(X_scaled, k):
-    km = KMeans(n_clusters=k, n_init=10, random_state=RANDOM_SEED)  # default k-means++ init, best of 10 random starts
+def run_plain_kmeans(X_scaled, k, seed=RANDOM_SEED, verbose=True):
+    km = KMeans(n_clusters=k, n_init=10, random_state=seed)  # default k-means++ init, best of 10 random starts
     labels = km.fit_predict(X_scaled)
     sil = silhouette_score(X_scaled, labels)
-    print(f"\nPlain K-Means (k-means++ init, best of 10 random starts): silhouette = {sil:.4f}")
+    if verbose:
+        print(f"\nPlain K-Means (k-means++ init, best of 10 random starts): silhouette = {sil:.4f}")
     return km, labels, sil
 
 
@@ -175,7 +177,12 @@ if not hasattr(creator, "Individual"):
     creator.create("Individual", list, fitness=creator.FitnessMax)
 
 
-def run_ga_kmeans(X_scaled, k, n_features):
+def run_ga_kmeans(X_scaled, k, n_features, seed=RANDOM_SEED, verbose=True, pop_size=None, n_gen=None):
+    pop_size = pop_size or POP_SIZE
+    n_gen = n_gen or N_GEN
+    random.seed(seed)
+    np.random.seed(seed)
+
     n_genes = k * n_features
     mins = X_scaled.min(axis=0)
     maxs = X_scaled.max(axis=0)
@@ -187,7 +194,7 @@ def run_ga_kmeans(X_scaled, k, n_features):
     def fitness_fn(individual):
         centroids = np.array(individual).reshape(k, n_features)
         try:
-            km = KMeans(n_clusters=k, init=centroids, n_init=1, max_iter=300, random_state=RANDOM_SEED)
+            km = KMeans(n_clusters=k, init=centroids, n_init=1, max_iter=300, random_state=seed)
             labels = km.fit_predict(X_scaled)
             if len(set(labels)) < k:
                 return (-1.0,)  # a cluster vanished — invalid solution
@@ -210,16 +217,17 @@ def run_ga_kmeans(X_scaled, k, n_features):
     toolbox.register("mutate", tools.mutGaussian, mu=0, sigma=0.3, indpb=0.3)
     toolbox.register("select", tools.selTournament, tournsize=3)
 
-    population = toolbox.population(n=POP_SIZE)
+    population = toolbox.population(n=pop_size)
     fitnesses = list(map(toolbox.evaluate, population))
     for ind, fit in zip(population, fitnesses):
         ind.fitness.values = fit
 
     history = [max(population, key=lambda i: i.fitness.values[0]).fitness.values[0]]
-    print(f"\n{'=' * 60}\nGA SEARCH — Centroid Initialization\n{'=' * 60}")
-    print(f"Generation 0 | Best silhouette: {history[0]:.4f}")
+    if verbose:
+        print(f"\n{'=' * 60}\nGA SEARCH — Centroid Initialization\n{'=' * 60}")
+        print(f"Generation 0 | Best silhouette: {history[0]:.4f}")
 
-    for gen in range(1, N_GEN + 1):
+    for gen in range(1, n_gen + 1):
         offspring = toolbox.select(population, len(population))
         offspring = list(map(toolbox.clone, offspring))
 
@@ -244,26 +252,103 @@ def run_ga_kmeans(X_scaled, k, n_features):
         population[:] = offspring
         best = max(population, key=lambda i: i.fitness.values[0])
         history.append(best.fitness.values[0])
-        if gen % 5 == 0 or gen == N_GEN:
+        if verbose and (gen % 5 == 0 or gen == n_gen):
             print(f"Generation {gen} | Best silhouette: {best.fitness.values[0]:.4f}")
 
     best_individual = max(population, key=lambda i: i.fitness.values[0])
     best_centroids = np.array(best_individual).reshape(k, n_features)
 
-    final_km = KMeans(n_clusters=k, init=best_centroids, n_init=1, max_iter=300, random_state=RANDOM_SEED)
+    final_km = KMeans(n_clusters=k, init=best_centroids, n_init=1, max_iter=300, random_state=seed)
     final_labels = final_km.fit_predict(X_scaled)
     final_sil = silhouette_score(X_scaled, final_labels)
 
-    plt.figure(figsize=(7, 4))
-    plt.plot(range(len(history)), history, color="#9C3B63", linewidth=2, marker="o", markersize=3)
-    plt.title("GA Convergence — Centroid Initialization")
-    plt.xlabel("Generation")
-    plt.ylabel("Best Silhouette Score")
-    plt.tight_layout()
-    plt.savefig(os.path.join(OUT_DIR, "ga_convergence_clustering.png"), dpi=150)
-    plt.close()
+    if verbose:
+        plt.figure(figsize=(7, 4))
+        plt.plot(range(len(history)), history, color="#9C3B63", linewidth=2, marker="o", markersize=3)
+        plt.title("GA Convergence — Centroid Initialization")
+        plt.xlabel("Generation")
+        plt.ylabel("Best Silhouette Score")
+        plt.tight_layout()
+        plt.savefig(os.path.join(OUT_DIR, "ga_convergence_clustering.png"), dpi=150)
+        plt.close()
 
     return final_km, final_labels, final_sil
+
+
+# =========================================================
+# Robustness check: does GA consistently beat plain K-Means
+# across multiple independent random seeds, or was one run lucky?
+# =========================================================
+
+def run_robustness_check(X_scaled, k, n_features, seeds=(42, 7, 21, 99, 123)):
+    print("\n" + "=" * 60)
+    print(f"ROBUSTNESS CHECK — {len(seeds)} independent seeds")
+    print("=" * 60)
+    print("(Using a lighter GA config per seed — population 20, 15 generations — "
+          "for speed; the main reported result above used the full configuration.)")
+
+    plain_scores, ga_scores = [], []
+    for seed in seeds:
+        _, _, p_sil = run_plain_kmeans(X_scaled, k, seed=seed, verbose=False)
+        _, _, g_sil = run_ga_kmeans(X_scaled, k, n_features, seed=seed, verbose=False, pop_size=20, n_gen=15)
+        plain_scores.append(p_sil)
+        ga_scores.append(g_sil)
+        print(f"Seed {seed:4d}: plain={p_sil:.4f}  GA={g_sil:.4f}  diff={g_sil - p_sil:+.4f}")
+
+    plain_scores, ga_scores = np.array(plain_scores), np.array(ga_scores)
+    diffs = ga_scores - plain_scores
+    wins = int((diffs > 0).sum())
+
+    print(f"\nPlain K-Means: {plain_scores.mean():.4f} +/- {plain_scores.std():.4f}")
+    print(f"GA-optimized:  {ga_scores.mean():.4f} +/- {ga_scores.std():.4f}")
+    print(f"Mean improvement: {diffs.mean():+.4f}  |  GA won in {wins}/{len(seeds)} seeds")
+
+    if len(seeds) >= 3 and diffs.std() > 1e-10:
+        t_stat, p_value = stats.ttest_rel(ga_scores, plain_scores)
+        print(f"Paired t-test: t={t_stat:.3f}, p={p_value:.4f}", end="  ")
+        significant = p_value < 0.05 and diffs.mean() > 0
+        if significant:
+            print("-> Statistically significant improvement across seeds (p < 0.05). "
+                  "Note: with only a handful of seeds, this test has limited statistical power — "
+                  "treat the consistency of wins (see above) as equally important evidence.")
+        else:
+            print("-> Not statistically significant at this sample size, but directionally "
+                  "consistent if most/all seeds show a positive difference.")
+    elif diffs.std() <= 1e-10:
+        t_stat, p_value, significant = None, None, (diffs.mean() > 1e-10)
+        print("All seeds produced identical (or near-identical) results — no variance to test. "
+              "This typically means the clustering problem has one clear, stable optimum that both "
+              "methods reliably find.")
+    else:
+        t_stat, p_value, significant = None, None, None
+
+    plt.figure(figsize=(7, 4.5))
+    x = np.arange(len(seeds))
+    width = 0.35
+    plt.bar(x - width/2, plain_scores, width, label="Plain K-Means", color="#D9799E")
+    plt.bar(x + width/2, ga_scores, width, label="GA-optimized", color="#9C3B63")
+    plt.xticks(x, [f"Seed {s}" for s in seeds])
+    plt.ylabel("Silhouette Score")
+    plt.title("Robustness Check: Plain vs. GA-Optimized K-Means Across Seeds")
+    plt.legend()
+    plt.tight_layout()
+    out_path = os.path.join(OUT_DIR, "robustness_check.png")
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+    print(f"\nSaved: {out_path}")
+
+    return {
+        "seeds": list(seeds),
+        "plain_scores": [float(s) for s in plain_scores],
+        "ga_scores": [float(s) for s in ga_scores],
+        "plain_mean": float(plain_scores.mean()), "plain_std": float(plain_scores.std()),
+        "ga_mean": float(ga_scores.mean()), "ga_std": float(ga_scores.std()),
+        "mean_improvement": float(diffs.mean()),
+        "ga_wins": wins, "total_seeds": len(seeds),
+        "t_statistic": float(t_stat) if t_stat is not None else None,
+        "p_value": float(p_value) if p_value is not None else None,
+        "significant": bool(significant) if significant is not None else None,
+    }
 
 
 # =========================================================
@@ -390,6 +475,8 @@ def main():
         final_labels, final_km, which = plain_labels, plain_km, "plain"
     print(f"\nUsing {which} K-Means result for cluster interpretation (higher silhouette score).")
 
+    robustness_results = run_robustness_check(X_scaled, K_CLUSTERS, X_scaled.shape[1])
+
     df_result, cluster_to_tier = interpret_clusters(df, final_labels, scaler, feature_cols)
     plot_cluster_pca(X_scaled, cluster_to_tier, final_labels)
 
@@ -399,6 +486,7 @@ def main():
         "improvement": float(improvement),
         "used_for_final_interpretation": which,
         "cluster_tiers": {str(k): v for k, v in cluster_to_tier.items()},
+        "robustness_check": robustness_results,
     }
     summary_path = os.path.join(OUT_DIR, "phase5_clustering_results.json")
     with open(summary_path, "w") as f:
