@@ -1,0 +1,11 @@
+{
+  "plain_kmeans_silhouette": 0.16542258874654145,
+  "ga_kmeans_silhouette": 0.18981744187847066,
+  "improvement": 0.02439485313192921,
+  "used_for_final_interpretation": "GA-optimized",
+  "cluster_tiers": {
+    "2": "Severe Risk",
+    "0": "Moderate Risk",
+    "1": "Low Risk"
+  }
+}

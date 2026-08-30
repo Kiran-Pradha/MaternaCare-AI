@@ -304,12 +304,16 @@ def evaluate_risk_classifier_with_trends(trend_df, X_orig, y_orig):
 
     print(f"Using a reduced trend feature set: {len(trend_feature_cols)} features "
           f"(down from {len(FEATURES) * 5 + 1} — dropped rolling_avg and volatility to reduce noise/dimensionality)")
+    print("Using max_features=None (Random Forest considers ALL features at every split, not a random "
+          "subset) — this prevents the model's default random feature-sampling from disproportionately "
+          "picking noisy engineered columns over the more reliable raw vitals when many added features "
+          "carry only weak signal.")
 
     # ---- Single 80/20 split (kept for continuity with earlier phases) ----
     X_train_trend, X_test_trend, y_train, y_test = train_test_split(
         X_trend, y_encoded, test_size=0.2, random_state=RANDOM_SEED, stratify=y_encoded
     )
-    trend_clf = RandomForestClassifier(n_estimators=150, random_state=RANDOM_SEED)
+    trend_clf = RandomForestClassifier(n_estimators=150, max_features=None, random_state=RANDOM_SEED)
     trend_clf.fit(X_train_trend, y_train)
     trend_preds = trend_clf.predict(X_test_trend)
     trend_acc = accuracy_score(y_test, trend_preds)
@@ -318,7 +322,7 @@ def evaluate_risk_classifier_with_trends(trend_df, X_orig, y_orig):
     X_train_latest, X_test_latest, _, _ = train_test_split(
         X_latest, y_encoded, test_size=0.2, random_state=RANDOM_SEED, stratify=y_encoded
     )
-    latest_clf = RandomForestClassifier(n_estimators=150, random_state=RANDOM_SEED)
+    latest_clf = RandomForestClassifier(n_estimators=150, max_features=None, random_state=RANDOM_SEED)
     latest_clf.fit(X_train_latest, y_train)
     latest_preds = latest_clf.predict(X_test_latest)
     latest_acc = accuracy_score(y_test, latest_preds)
@@ -336,11 +340,11 @@ def evaluate_risk_classifier_with_trends(trend_df, X_orig, y_orig):
     cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=5, random_state=RANDOM_SEED)
 
     trend_cv_scores = cross_val_score(
-        RandomForestClassifier(n_estimators=150, random_state=RANDOM_SEED),
+        RandomForestClassifier(n_estimators=150, max_features=None, random_state=RANDOM_SEED),
         X_trend, y_encoded, cv=cv, scoring="accuracy", n_jobs=-1
     )
     latest_cv_scores = cross_val_score(
-        RandomForestClassifier(n_estimators=150, random_state=RANDOM_SEED),
+        RandomForestClassifier(n_estimators=150, max_features=None, random_state=RANDOM_SEED),
         X_latest, y_encoded, cv=cv, scoring="accuracy", n_jobs=-1
     )
 
