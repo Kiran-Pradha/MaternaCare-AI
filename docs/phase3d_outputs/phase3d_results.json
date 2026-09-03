@@ -1,0 +1,68 @@
+{
+  "n_groups": 35,
+  "n_conflicting_rows": 215,
+  "action_breakdown": {
+    "Drop group": 15,
+    "Keep majority only": 13,
+    "Keep as-is": 7
+  },
+  "best_actions": [
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    1,
+    2,
+    2,
+    2,
+    0,
+    1,
+    0,
+    0,
+    1,
+    2,
+    1,
+    1,
+    2,
+    0,
+    0,
+    0,
+    2,
+    1,
+    1,
+    1,
+    1,
+    2,
+    1,
+    0,
+    0,
+    0,
+    1,
+    0,
+    1
+  ],
+  "baseline_cv": {
+    "mean": 0.8461551968004684,
+    "std": 0.022941612245034455
+  },
+  "drop_all_cv": {
+    "mean": 0.8352982490367262,
+    "std": 0.027156919319504487
+  },
+  "ga_optimized_cv": {
+    "mean": 0.8589747841779253,
+    "std": 0.024750838350155607
+  },
+  "ga_vs_baseline": {
+    "t_statistic": 5.101268271065249,
+    "p_value": 3.2167022075321265e-05,
+    "significant": true
+  },
+  "ga_vs_drop_all": {
+    "t_statistic": 5.86487916548119,
+    "p_value": 4.75447810471151e-06,
+    "significant": true
+  }
+}
