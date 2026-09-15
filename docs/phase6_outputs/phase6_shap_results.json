@@ -1,0 +1,140 @@
+{
+  "model_metrics": {
+    "test_accuracy": 0.8620689655172413,
+    "test_f1": 0.861457828679344
+  },
+  "global_feature_importance": {
+    "BS": 0.16204714875411777,
+    "SystolicBP": 0.08633178219348221,
+    "Age": 0.053083543426065104,
+    "BodyTemp": 0.05023631202740825,
+    "DiastolicBP": 0.04234895815761417,
+    "HeartRate": 0.03145146890064099
+  },
+  "top_feature": "BS",
+  "example_explanations": {
+    "Low Risk": {
+      "predicted_class": "Low Risk",
+      "base_value": 0.405732700135685,
+      "top_factors": [
+        "BS = 7.5 increased the model's confidence in this Low Risk prediction (SHAP contribution: +0.332)",
+        "SystolicBP = 120.0 increased the model's confidence in this Low Risk prediction (SHAP contribution: +0.068)",
+        "BodyTemp = 98.0 increased the model's confidence in this Low Risk prediction (SHAP contribution: +0.066)"
+      ],
+      "full_contributions": [
+        [
+          "BS",
+          0.33173205203034045,
+          7.5
+        ],
+        [
+          "SystolicBP",
+          0.0680091037996462,
+          120.0
+        ],
+        [
+          "BodyTemp",
+          0.06616330906810346,
+          98.0
+        ],
+        [
+          "HeartRate",
+          0.04286423651505345,
+          70.0
+        ],
+        [
+          "DiastolicBP",
+          0.03710287080514331,
+          80.0
+        ],
+        [
+          "Age",
+          -0.03399804413473527,
+          50.0
+        ]
+      ]
+    },
+    "Mid Risk": {
+      "predicted_class": "Mid Risk",
+      "base_value": 0.3293351424694707,
+      "top_factors": [
+        "SystolicBP = 130.0 increased the model's confidence in this Mid Risk prediction (SHAP contribution: +0.414)",
+        "HeartRate = 78.0 increased the model's confidence in this Mid Risk prediction (SHAP contribution: +0.108)",
+        "Age = 29.0 increased the model's confidence in this Mid Risk prediction (SHAP contribution: +0.106)"
+      ],
+      "full_contributions": [
+        [
+          "SystolicBP",
+          0.41427128476982805,
+          130.0
+        ],
+        [
+          "HeartRate",
+          0.10767752049322851,
+          78.0
+        ],
+        [
+          "Age",
+          0.10642659057892193,
+          29.0
+        ],
+        [
+          "DiastolicBP",
+          0.055548352192772696,
+          70.0
+        ],
+        [
+          "BS",
+          -0.024216173863941266,
+          7.7
+        ],
+        [
+          "BodyTemp",
+          0.010957283359722115,
+          98.0
+        ]
+      ]
+    },
+    "High Risk": {
+      "predicted_class": "High Risk",
+      "base_value": 0.26493215739484416,
+      "top_factors": [
+        "BS = 11.0 increased the model's confidence in this High Risk prediction (SHAP contribution: +0.373)",
+        "SystolicBP = 120.0 decreased the model's confidence in this High Risk prediction (SHAP contribution: -0.093)",
+        "Age = 40.0 increased the model's confidence in this High Risk prediction (SHAP contribution: +0.071)"
+      ],
+      "full_contributions": [
+        [
+          "BS",
+          0.37342914977943775,
+          11.0
+        ],
+        [
+          "SystolicBP",
+          -0.09335001942969937,
+          120.0
+        ],
+        [
+          "Age",
+          0.07124940966218207,
+          40.0
+        ],
+        [
+          "DiastolicBP",
+          -0.03196207320568249,
+          95.0
+        ],
+        [
+          "HeartRate",
+          0.02355313001295614,
+          80.0
+        ],
+        [
+          "BodyTemp",
+          -0.016431480043763085,
+          98.0
+        ]
+      ]
+    }
+  }
+}
