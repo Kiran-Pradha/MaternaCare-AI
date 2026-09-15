@@ -1,0 +1,92 @@
+{
+  "test1_train_test_gap": {
+    "latest_train": 0.9055723943559311,
+    "latest_test": 0.8333560942301126,
+    "latest_gap": 0.07221630012581848,
+    "trend_train": 1.0,
+    "trend_test": 0.7317465736721454,
+    "trend_gap": 0.26825342632785465,
+    "gap_increase": 0.19603712620203617
+  },
+  "test2_random_control": {
+    "latest_test": 0.8333560942301126,
+    "trend_test": 0.7317465736721454,
+    "random_test": 0.7041457347705213,
+    "trend_drop": -0.10160952055796724,
+    "random_drop": -0.12921035945959125
+  },
+  "test3_max_features": {
+    "none_latest": 0.8333560942301126,
+    "none_trend": 0.7317465736721454,
+    "none_drop": -0.10160952055796724,
+    "sqrt_latest": 0.8304053065405063,
+    "sqrt_trend": 0.71598790420914,
+    "sqrt_drop": -0.11441740233136621
+  },
+  "test4_uniqueness": {
+    "per_feature": {
+      "SystolicBP_latest": {
+        "n_unique": 19,
+        "ratio": 0.01873767258382643
+      },
+      "DiastolicBP_latest": {
+        "n_unique": 16,
+        "ratio": 0.015779092702169626
+      },
+      "BS_latest": {
+        "n_unique": 29,
+        "ratio": 0.028599605522682446
+      },
+      "BodyTemp_latest": {
+        "n_unique": 8,
+        "ratio": 0.007889546351084813
+      },
+      "HeartRate_latest": {
+        "n_unique": 16,
+        "ratio": 0.015779092702169626
+      },
+      "SystolicBP_rate_of_change": {
+        "n_unique": 1014,
+        "ratio": 1.0
+      },
+      "DiastolicBP_rate_of_change": {
+        "n_unique": 1014,
+        "ratio": 1.0
+      },
+      "BS_rate_of_change": {
+        "n_unique": 1014,
+        "ratio": 1.0
+      },
+      "BodyTemp_rate_of_change": {
+        "n_unique": 1014,
+        "ratio": 1.0
+      },
+      "HeartRate_rate_of_change": {
+        "n_unique": 1014,
+        "ratio": 1.0
+      },
+      "SystolicBP_slope": {
+        "n_unique": 1014,
+        "ratio": 1.0
+      },
+      "DiastolicBP_slope": {
+        "n_unique": 1014,
+        "ratio": 1.0
+      },
+      "BS_slope": {
+        "n_unique": 1014,
+        "ratio": 1.0
+      },
+      "BodyTemp_slope": {
+        "n_unique": 1014,
+        "ratio": 1.0
+      },
+      "HeartRate_slope": {
+        "n_unique": 1014,
+        "ratio": 1.0
+      }
+    },
+    "mean_ratio_raw_vitals": 0.017357001972386585,
+    "mean_ratio_trend_features": 1.0
+  }
+}
