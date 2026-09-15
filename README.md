@@ -1,107 +1,161 @@
 # MaternaCare AI
 
-A Hybrid, Explainable, Longitudinal Decision-Support System for Maternal Health Risk in Low-Resource Settings.
+A hybrid, explainable, longitudinal decision-support system for maternal health risk assessment in low-resource settings.
 
-## Project Structure
+## Project status
 
-```
+This project has already progressed through several major phases of the pipeline and includes working model experiments, optimization routines, diagnostic tests, and generated outputs.
+
+### Completed so far
+
+- Data ingestion and exploratory analysis for the maternal health dataset
+- Baseline model benchmarking and comparison
+- Conflict-resolution / curation workflow for duplicate or contradictory labels
+- Genetic algorithm (GA) optimization for model selection and conflict handling
+- Ensemble and blended modeling experiments
+- Longitudinal trajectory simulation and trend-feature engineering
+- Sensitivity analysis of simulation design choices
+- Diagnostic analysis explaining why trend features may degrade performance
+- Clustering and segmentation analysis for patient patterns
+- Output artifacts saved under the docs/ folder for review and presentation use
+
+## Repository structure
+
+```text
 maternacare-ai/
+├── app/                              # Demo / application layer
 ├── data/
-│   ├── raw/              # Original downloaded datasets (never edit these directly)
-│   └── processed/        # Cleaned/engineered datasets used for modeling
-├── notebooks/            # Exploratory notebooks (EDA, experiments)
+│   ├── raw/                          # Original datasets
+│   └── processed/                    # Cleaned, engineered, and simulated outputs
+├── docs/
+│   ├── eda_outputs/                  # EDA plots and summaries
+│   ├── phase2_outputs/               # Baseline model outputs
+│   ├── phase3_outputs/               # Phase 3 diagnostic/model outputs
+│   ├── phase3d_outputs/              # Conflict-resolution / curation outputs
+│   ├── phase3f_outputs/              # Sensitivity results
+│   ├── phase3g_outputs/              # Trend-degradation diagnostic outputs
+│   ├── phase4_outputs/               # Trajectory simulation results
+│   ├── phase5_outputs/               # Clustering and segmentation outputs
+│   └── phase6_outputs/               # Additional project artifacts
+├── models/                           # Saved trained joblib models
+├── notebooks/                        # Research notebooks and experiments
 ├── src/
-│   ├── data/              # Data loading, cleaning, trajectory simulation
-│   ├── models/            # Baseline + GA-optimized classifiers
-│   ├── clustering/         # GA + K-Means iron-deficiency module
-│   ├── explainability/    # SHAP integration
-│   ├── rules/              # Recommendation rules engine
-│   └── voice/              # Speech-to-text / text-to-speech interface
-├── app/                   # Streamlit demo app
-├── models/                # Saved trained model files (.pkl, .joblib)
-├── docs/                  # Project write-up, roadmap, presentation, references
-└── requirements.txt
+│   ├── clustering/                   # GA + clustering logic
+│   ├── data/                         # Data loading, EDA, trajectory simulation
+│   ├── explainability/               # Explainability-related components
+│   ├── models/                       # Baseline, GA-optimized, and diagnostic models
+│   ├── rules/                        # Recommendation logic
+│   ├── voice/                        # Voice interface components
+│   └── __init__.py
+├── README.md
+├── requirements.txt
+└── .gitignore
 ```
 
-## Team Setup (VS Code)
+## Key project milestones completed
 
-Each team member should follow these steps once, on their own machine:
+### Phase 1: Data preparation and exploratory analysis
+- Dataset loading and review
+- Risk-label normalization
+- Exploratory summaries and visual inspection
+- Output saved under docs/eda_outputs/
 
-1. **Clone the repo** (after it's created on GitHub — see below):
-   ```bash
-   git clone https://github.com/<your-username>/maternacare-ai.git
-   cd maternacare-ai
-   ```
+### Phase 2: Baseline modeling
+- Baseline classifier training and evaluation
+- Model comparison and benchmark results
+- Outputs stored in docs/phase2_outputs/
 
-2. **Create a virtual environment**:
-   ```bash
-   python -m venv venv
-   ```
-   Activate it:
-   - Windows: `venv\Scripts\activate`
-   - Mac/Linux: `source venv/bin/activate`
+### Phase 3: Model refinement and diagnostic checks
+- Conflict group identification and resolution strategy
+- GA-based curation search for noisy contradictory labels
+- Ceiling diagnostic analysis for model upper bounds
+- Ensemble and blended-model experiments
+- Sensitivity evaluation of simulation assumptions
+- Diagnostic study explaining performance degradation from trend features
 
-3. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+Generated outputs include:
+- docs/phase3_outputs/
+- docs/phase3d_outputs/
+- docs/phase3f_outputs/
+- docs/phase3g_outputs/
 
-4. **In VS Code**: open the project folder (`File > Open Folder`), then select the `venv` interpreter (`Ctrl+Shift+P` → "Python: Select Interpreter" → choose the one inside `venv/`).
+### Phase 4: Longitudinal trajectory modeling
+- Simulated patient visit trajectories
+- Trend feature engineering using visit-level changes
+- Trajectory-based classification outputs
+- Saved results in docs/phase4_outputs/
 
-5. **Install the recommended VS Code extensions**: Python (Microsoft), Jupyter.
+### Phase 5: Clustering and patient grouping
+- Cluster analysis of maternal risk patterns
+- Robustness checks and visualization
+- Saved results in docs/phase5_outputs/
 
-## Creating the GitHub Repo (do this once, as a team)
+## Representative model and analysis outputs
 
-1. One team member goes to https://github.com/new, creates a repository named `maternacare-ai` (keep it **Private** if you don't want it public until submission).
-2. In that same folder on your machine (this folder), run:
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial project structure"
-   git branch -M main
-   git remote add origin https://github.com/<your-username>/maternacare-ai.git
-   git push -u origin main
-   ```
-3. Go to the repo on GitHub → **Settings → Collaborators** → add your other two teammates by their GitHub usernames/emails.
-4. Everyone else then just does `git clone <the repo URL>` (step 1 above) instead of `git init`.
+The project currently includes trained artifacts and diagnostics such as:
 
-## Datasets Needed (Phase 1)
+- baseline_random_forest.joblib
+- baseline_xgboost.joblib
+- ga_optimized_random_forest.joblib
+- ga_optimized_xgboost.joblib
+- ga_conflict_resolution.joblib
+- ga_ensemble_blend.joblib
+- ga_kmeans_anemia.joblib
+- trajectory_pattern_classifier.joblib
+- risk_classifier_with_trends.joblib
 
-Download these manually and place them in `data/raw/`:
+and corresponding reports in docs/phase*_outputs/.
 
-1. **UCI Maternal Health Risk Dataset**
-   Source: Kaggle — search "Maternal Health Risk Data Set" (uploaded by csafrit2 / originally UCI).
-   Save as: `data/raw/maternal_health_risk.csv`
+## Execution notes
 
-2. **Anemia / CBC Dataset**
-   Source: Kaggle — search "Anemia Dataset" (Hemoglobin, MCH, MCHC, MCV columns).
-   Save as: `data/raw/anemia_dataset.csv`
+The project is designed to run from the repository root.
 
-> Tip: If you have a Kaggle account, install the Kaggle CLI (`pip install kaggle`), place your `kaggle.json` API token in `~/.kaggle/`, then you can download via `kaggle datasets download -d <dataset-slug>` instead of the browser.
+Common commands:
 
-## Running Phase 1 (EDA)
-
-Once both CSVs are in `data/raw/`, run:
 ```bash
+# Activate virtual environment (Windows PowerShell)
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+.\venv\Scripts\Activate.ps1
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run EDA
 python src/data/eda.py
+
+# Run sensitivity analysis
+python src/models/sensitivity_analysis.py
+
+# Run trend degradation diagnostic
+python src/models/trend_degradation_diagnostic.py
 ```
-This will print dataset summaries and save plots to `docs/eda_outputs/`.
 
-## Workflow / Git Practice
+## Current interpretation of findings
 
-- Never commit directly to `main` for anything beyond initial setup. Create a branch per feature:
-  ```bash
-  git checkout -b <yourname>/baseline-classifier
-  ```
-- Push your branch and open a Pull Request on GitHub so teammates can review before merging.
-- Pull the latest `main` before starting new work each day: `git pull origin main`.
+The project has already established that:
 
-## Team Roles (reference)
+- baseline and optimized models can achieve strong classification performance,
+- conflict resolution is important for cleaning contradictory labels,
+- trend features can create memorization effects in small structured datasets,
+- sensitivity analysis shows the negative trend-feature effect is robust across tested simulation settings,
+- clustering and trajectory analysis provide additional structure for patient-level interpretation.
 
-- **Member 1** — Data & Core Model: baseline classifier, GA-optimization, trimester/trajectory modeling (`src/data/`, `src/models/`)
-- **Member 2** — Explainability, Recommendation & Clustering: SHAP, rules engine, GA+K-Means clustering (`src/explainability/`, `src/rules/`, `src/clustering/`)
-- **Member 3** — Interface & Integration: voice interface, demo app, documentation (`src/voice/`, `app/`, `docs/`)
+## Next steps
 
-## Reference Docs
+Planned continuation of the project includes:
 
-See `docs/` for the full project write-up, 12-phase roadmap PDF, and Zeroth Review presentation.
+- finalizing the main model selection narrative,
+- integrating explainability and rule-based recommendations,
+- polishing the project write-up and presentation materials,
+- preparing the application layer and final user-facing workflow.
+
+## Reference documents
+
+The project includes several supporting materials in docs/:
+
+- project roadmap
+- zeroth review presentation
+- project write-up
+- output summaries and figures for each major phase
+
+This README reflects the state of the project as completed so far and will continue to be updated as additional work is finalized.
