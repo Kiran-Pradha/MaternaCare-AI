@@ -136,5 +136,49 @@
         ]
       ]
     }
+  },
+  "monotonicity_check": {
+    "Age": {
+      "high_risk_correlation": 0.568057351731236,
+      "high_risk_p": 9.66552734613493e-19,
+      "low_risk_correlation": -0.4761032226004459,
+      "low_risk_p": 7.006639011793512e-13,
+      "verdict": "Monotonic (as expected)"
+    },
+    "SystolicBP": {
+      "high_risk_correlation": 0.1657017705816148,
+      "high_risk_p": 0.018144085550240396,
+      "low_risk_correlation": -0.7029203557416743,
+      "low_risk_p": 1.443739106757886e-31,
+      "verdict": "Monotonic (as expected)"
+    },
+    "DiastolicBP": {
+      "high_risk_correlation": 0.4474640611013906,
+      "high_risk_p": 2.1837101157665238e-11,
+      "low_risk_correlation": -0.30165964020660363,
+      "low_risk_p": 1.2211939910863025e-05,
+      "verdict": "Monotonic (as expected)"
+    },
+    "BS": {
+      "high_risk_correlation": 0.8053977895359927,
+      "high_risk_p": 1.540168063329589e-47,
+      "low_risk_correlation": -0.3500106997843014,
+      "low_risk_p": 3.0726380715811946e-07,
+      "verdict": "Monotonic (as expected)"
+    },
+    "BodyTemp": {
+      "high_risk_correlation": 0.6568139493908333,
+      "high_risk_p": 1.9378593951486363e-26,
+      "low_risk_correlation": -0.6352970728498134,
+      "low_risk_p": 2.4270427500967905e-24,
+      "verdict": "Monotonic (as expected)"
+    },
+    "HeartRate": {
+      "high_risk_correlation": 0.2861048089419616,
+      "high_risk_p": 3.503071135219846e-05,
+      "low_risk_correlation": -0.16647676163676955,
+      "low_risk_p": 0.0176026892201455,
+      "verdict": "Monotonic (as expected)"
+    }
   }
 }

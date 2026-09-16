@@ -324,6 +324,85 @@ def plot_waterfall(explainer, X_test, patient_idx, predicted_class, class_name):
         return False
 
 
+def check_monotonicity(shap_values_per_class, X_test, feature_names):
+    """
+    Tests whether each feature behaves consistently across ALL test patients,
+    not just the 3 hand-picked examples. For each feature, computes the
+    Spearman correlation between the feature's raw value and its SHAP
+    contribution toward High Risk (expect positive: higher value -> pushes
+    toward High Risk) and toward Low Risk (expect negative: higher value ->
+    pushes away from Low Risk).
+
+    A feature that is NOT monotonic (weak or wrong-signed correlation) is
+    still not necessarily a bug -- it can genuinely have a non-linear or
+    context-dependent relationship with risk -- but it is worth knowing
+    which features behave this way before presenting "the model makes sense"
+    as a blanket claim.
+    """
+    from scipy.stats import spearmanr
+
+    print("\n" + "=" * 60)
+    print("MONOTONICITY CHECK -- does each feature behave consistently")
+    print("across ALL test patients, not just the 3 hand-picked examples?")
+    print("=" * 60)
+
+    high_idx = CLASS_NAMES.index("High Risk")
+    low_idx = CLASS_NAMES.index("Low Risk")
+
+    high_shap = shap_values_per_class[high_idx]
+    low_shap = shap_values_per_class[low_idx]
+
+    results = {}
+    print(f"\n{'Feature':<15} {'corr vs High Risk':>18} {'corr vs Low Risk':>18}  Verdict")
+    print("-" * 75)
+    for i, feat in enumerate(feature_names):
+        feat_vals = X_test[feat].values
+        high_corr, high_p = spearmanr(feat_vals, high_shap[:, i])
+        low_corr, low_p = spearmanr(feat_vals, low_shap[:, i])
+
+        # Expected: positive correlation with High Risk push, negative with Low Risk push
+        high_ok = high_corr > 0.15 and high_p < 0.05
+        low_ok = low_corr < -0.15 and low_p < 0.05
+        if high_ok and low_ok:
+            verdict = "Monotonic (as expected)"
+        elif high_ok or low_ok:
+            verdict = "Partially monotonic"
+        else:
+            verdict = "Not clearly monotonic"
+
+        print(f"{feat:<15} {high_corr:>+13.3f} (p={high_p:.3f}) {low_corr:>+13.3f} (p={low_p:.3f})  {verdict}")
+
+        results[feat] = {
+            "high_risk_correlation": float(high_corr), "high_risk_p": float(high_p),
+            "low_risk_correlation": float(low_corr), "low_risk_p": float(low_p),
+            "verdict": verdict,
+        }
+
+    n_monotonic = sum(1 for r in results.values() if r["verdict"] == "Monotonic (as expected)")
+    print(f"\n{n_monotonic}/{len(feature_names)} features showed the fully expected monotonic pattern "
+          f"across all {len(X_test)} test patients.")
+    print("(Partial/non-monotonic features are not necessarily errors -- interaction effects and")
+    print(" non-linear clinical relationships are real and expected in a tree ensemble. This check")
+    print(" tells you WHICH features to double check or caveat, not that something is broken.)")
+
+    # Scatter plot for the two most important features
+    top2 = sorted(results.keys(), key=lambda f: abs(results[f]["high_risk_correlation"]), reverse=True)[:2]
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    for ax, feat in zip(axes, top2):
+        i = feature_names.index(feat)
+        ax.scatter(X_test[feat].values, high_shap[:, i], alpha=0.5, color="#9C3B63", s=20)
+        ax.axhline(y=0, color="gray", linestyle="--", linewidth=1)
+        ax.set_xlabel(f"{feat} (actual value)")
+        ax.set_ylabel("SHAP contribution to High Risk")
+        ax.set_title(f"{feat}: corr={results[feat]['high_risk_correlation']:+.3f}")
+    plt.suptitle("Monotonicity Check -- Feature Value vs. SHAP Contribution (High Risk)")
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUT_DIR, "shap_monotonicity_check.png"), dpi=150)
+    plt.close()
+
+    return results
+
+
 def main():
     print("=" * 60)
     print("PHASE 6 -- SHAP EXPLAINABILITY")
@@ -377,11 +456,14 @@ def main():
 
         plot_waterfall(explainer, X_test, patient_idx, class_idx, class_name)
 
+    monotonicity_results = check_monotonicity(shap_values_per_class, X_test, feature_names)
+
     results = {
         "model_metrics": model_metrics,
         "global_feature_importance": global_importance,
         "top_feature": top_feature,
         "example_explanations": example_explanations,
+        "monotonicity_check": monotonicity_results,
     }
     summary_path = os.path.join(OUT_DIR, "phase6_shap_results.json")
     with open(summary_path, "w") as f:
