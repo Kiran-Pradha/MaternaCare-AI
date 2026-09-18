@@ -1,0 +1,64 @@
+[
+  {
+    "risk_level": "High Risk",
+    "trajectory_pattern": "Sudden Deterioration",
+    "primary_recommendation": {
+      "action": "Immediate referral to a higher-level facility",
+      "timeframe": "Within 24 hours",
+      "basis": "WHO: early assessment and referral recommended for high-risk pregnancy complications; rapid escalation is a known pre-eclampsia warning sign.",
+      "urgency": 4
+    },
+    "vital_flags": [
+      {
+        "flag": "Severe hypertension",
+        "detail": "BP 162/108 mmHg meets the severe threshold.",
+        "basis": "ACOG: >=160/110 mmHg is severe and requires urgent action.",
+        "urgency": 4
+      },
+      {
+        "flag": "Elevated blood sugar",
+        "detail": "Blood sugar reading of 14.5 is substantially elevated.",
+        "basis": "Consistent with gestational diabetes risk ranges reported in the maternal health literature reviewed for this project.",
+        "urgency": 2
+      }
+    ],
+    "overall_urgency": 4,
+    "explanation": "This High Risk classification was primarily driven by BS = 14.5. Recommended action: Immediate referral to a higher-level facility (Within 24 hours). Additional flags: Severe hypertension; Elevated blood sugar. Anemia screening: Moderate Risk -- Begin iron supplementation + dietary counseling (iron-rich foods); recheck Hemoglobin in 4 weeks.",
+    "anemia_recommendation": {
+      "tier": "Moderate Risk",
+      "action": "Begin iron supplementation + dietary counseling (iron-rich foods); recheck Hemoglobin in 4 weeks.",
+      "basis": "WHO: Moderate anemia (7-9.9 g/dL) -- standard iron supplementation protocol with follow-up."
+    }
+  },
+  {
+    "risk_level": "Mid Risk",
+    "trajectory_pattern": "Stable",
+    "primary_recommendation": {
+      "action": "Routine follow-up per standard antenatal care (ANC) schedule",
+      "timeframe": "Next scheduled visit",
+      "basis": "Standard ANC protocol -- routine monitoring sufficient when the trajectory is not worsening.",
+      "urgency": 1
+    },
+    "vital_flags": [],
+    "overall_urgency": 1,
+    "explanation": "This Mid Risk classification was primarily driven by SystolicBP = 128.0. Recommended action: Routine follow-up per standard antenatal care (ANC) schedule (Next scheduled visit). Anemia screening: Low Risk -- Routine dietary guidance; no supplementation needed; recheck at next scheduled visit.",
+    "anemia_recommendation": {
+      "tier": "Low Risk",
+      "action": "Routine dietary guidance; no supplementation needed; recheck at next scheduled visit.",
+      "basis": "WHO: Hemoglobin within or near normal range for pregnancy."
+    }
+  },
+  {
+    "risk_level": "Low Risk",
+    "trajectory_pattern": "Improving",
+    "primary_recommendation": {
+      "action": "Routine care; no escalation needed",
+      "timeframe": "Next scheduled visit",
+      "basis": "Standard ANC protocol.",
+      "urgency": 0
+    },
+    "vital_flags": [],
+    "overall_urgency": 0,
+    "explanation": "This Low Risk classification was primarily driven by BS = 7.2. Recommended action: Routine care; no escalation needed (Next scheduled visit)."
+  }
+]
