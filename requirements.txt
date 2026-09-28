@@ -19,6 +19,7 @@ imbalanced-learn
 vosk
 gTTS
 SpeechRecognition
+pyttsx3
 
 # Demo app
 streamlit

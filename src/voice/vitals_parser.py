@@ -55,7 +55,30 @@ _TENS = {
 
 
 def _words_to_number(text: str) -> Optional[float]:
-    """Convert a short word-number phrase like 'ninety eight point six' to 98.6."""
+    """Convert a short word-number phrase to a number.
+
+    Two distinct spoken-number grammars are supported, and it matters which
+    one applies:
+
+    1. COMPOSITIONAL ("ninety eight", "thirty two", "eighty eight"): a tens
+       word optionally followed by a ones word, meaning tens+ones by
+       addition -> 98, 32, 88. This is standard English number-naming.
+
+    2. DIGIT-BY-DIGIT ("one four zero", "one two five"): people reading out
+       vitals often speak each digit separately, especially for 3-digit
+       numbers like blood pressure (a systolic of 140 read as "one four
+       zero" rather than "one hundred forty"). Here the correct
+       reconstruction is string concatenation of the digits -> "140", NOT
+       summing them (1+4+0=5, which is wrong and was a real bug caught
+       during testing on a live transcript: "one four zero over ninety"
+       was misparsed as systolic=5 instead of 140).
+
+    Disambiguation rule: if any TENS word (twenty..ninety) appears in the
+    phrase, treat the whole phrase as compositional (standard grammar
+    requires a tens word for any 2-digit addition to make sense). If no
+    tens word appears and there are 2+ single-digit words in a row, treat
+    it as digit-by-digit reading. A lone teen/ones word is just that value.
+    """
     text = text.strip().lower()
     if "point" in text:
         whole_part, _, frac_part = text.partition("point")
@@ -64,7 +87,7 @@ def _words_to_number(text: str) -> Optional[float]:
             return None
         frac_digits = []
         for w in frac_part.strip().split():
-            if w in _ONES:
+            if w in _ONES and _ONES[w] <= 9:
                 frac_digits.append(str(_ONES[w]))
             else:
                 return None
@@ -72,21 +95,42 @@ def _words_to_number(text: str) -> Optional[float]:
             return whole
         return float(f"{int(whole)}.{''.join(frac_digits)}")
 
-    tokens = text.split()
-    total = 0
-    matched = False
+    tokens = [t for t in text.split() if t != "and"]
+    if not tokens:
+        return None
+
+    has_tens = any(t in _TENS for t in tokens)
+
+    if has_tens:
+        # Compositional: sum tens + ones (e.g. "ninety eight" -> 90+8=98)
+        total = 0
+        matched = False
+        for tok in tokens:
+            if tok in _TENS:
+                total += _TENS[tok]
+                matched = True
+            elif tok in _ONES:
+                total += _ONES[tok]
+                matched = True
+            else:
+                return None
+        return float(total) if matched else None
+
+    if len(tokens) == 1:
+        # Single word: teens (ten..nineteen) or a single digit stand alone
+        tok = tokens[0]
+        return float(_ONES[tok]) if tok in _ONES else None
+
+    # No tens word, multiple tokens: digit-by-digit reading. Each token must
+    # be a single digit (zero..nine) — a teen word here (e.g. "twelve") is
+    # ambiguous/unsupported in this mode and bails out rather than guessing.
+    digits = []
     for tok in tokens:
-        if tok in _TENS:
-            total += _TENS[tok]
-            matched = True
-        elif tok in _ONES:
-            total += _ONES[tok]
-            matched = True
-        elif tok in ("and",):
-            continue
+        if tok in _ONES and _ONES[tok] <= 9:
+            digits.append(str(_ONES[tok]))
         else:
             return None
-    return float(total) if matched else None
+    return float("".join(digits)) if digits else None
 
 
 _NUMBER_WORD_PATTERN = re.compile(

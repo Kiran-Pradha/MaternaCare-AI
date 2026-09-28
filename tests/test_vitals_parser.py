@@ -56,6 +56,25 @@ CASES = [
         "um the the patient uh seems fine today",
         dict(),
     ),
+    (
+        # digit-by-digit reading, the real bug found on a live transcript:
+        # "one four zero" must become 140 (concatenation), not 5 (summing
+        # 1+4+0). This is the most clinically dangerous class of bug in this
+        # module, since it silently produces a plausible-looking wrong BP.
+        "blood pressure one four zero over ninety",
+        dict(SystolicBP=140.0, DiastolicBP=90.0),
+    ),
+    (
+        # digit-by-digit with a zero digit and three digits total
+        "heart rate one two five",
+        dict(HeartRate=125.0),
+    ),
+    (
+        # compositional still must not regress: "eighty eight" = 80+8=88,
+        # not digit-concatenated to 808
+        "heart rate eighty eight",
+        dict(HeartRate=88.0),
+    ),
 ]
 
 OUT_OF_RANGE_CASE = "BP is 400 over 300, heart rate 5"
