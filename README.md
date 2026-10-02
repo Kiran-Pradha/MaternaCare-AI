@@ -379,7 +379,7 @@ This is the safety-oriented layer that turns model insight into practical guidan
 
 ---
 
-## Phase 8: Voice-based vitals intake and interaction
+## Phase 8: Voice-based vitals intake and interaction (prototype stage)
 
 ### Why we do it
 
@@ -387,7 +387,7 @@ In many real-world healthcare settings, data entry happens verbally. A healthcar
 
 ### How we do it
 
-The modules in `src/voice/` implement the pipeline:
+The modules in `src/voice/` implement a first-pass pipeline:
 
 - `vitals_parser.py` parses spoken or text-based vitals into structured values,
 - `vitals_extractor.py` extracts relevant fields from transcript content,
@@ -396,17 +396,28 @@ The modules in `src/voice/` implement the pipeline:
 - `stt_vosk_integration.py` prepares speech-to-text integration for networked environments,
 - `tts_gtts_integration.py` supports online TTS options if needed.
 
-The architecture is designed so that a transcript can be processed into structured vitals, confirmed back to the user, and then handed to the risk/rules engine.
+This is a usable research prototype, but it is not yet accurate enough for production clinical deployment.
+
+### Current limitation
+
+The core issue is that speech-to-text and transcript parsing still do not reliably recover the exact clinical values in real-world conversational speech. In particular:
+
+- numbers spoken as words or digit-by-digit can be misread,
+- blood pressure and sugar values are easy to confuse in the transcript,
+- partial or noisy utterances often result in missing or incorrectly parsed fields,
+- the pipeline can produce a structured output, but not consistently with the precision required for decision-making.
+
+This means the voice system is functional as an engineering prototype, but it is not yet clinically robust enough to be treated as a completed and accurate phase.
 
 ### Key outcome
 
-This phase moves the project toward a realistic field-use interface, especially for settings where digital forms are limited or unavailable.
+This phase provides the foundation for a field-use voice interface, but it also clearly exposes the need for further testing, better ASR tuning, and more robust parsing validation before it can be considered accurate enough for real deployment.
 
 ---
 
 ## Current status of the project
 
-The project has completed the major research and prototype pipeline from data understanding through optimization, trend analysis, clustering, explainability, rule-based recommendation, and voice intake.
+The project has completed the major research pipeline from data understanding through optimization, trend analysis, clustering, explainability, and rule-based recommendation. The voice component has also been implemented as a working prototype, but it is not yet accurate enough to be considered complete or clinically reliable.
 
 The main completed areas are:
 
@@ -417,9 +428,12 @@ The main completed areas are:
 - Phase 5: GA-optimized clustering for anemia tiers
 - Phase 6: explainability
 - Phase 7: clinical rules engine
-- Phase 8: voice pipeline groundwork
 
-The project is therefore already substantial and review-ready as a full research pipeline, even though final application integration and polishing remain.
+The ongoing / partial area is:
+
+- Phase 8: initial voice pipeline prototype, still requiring accuracy improvement and validation
+
+This means the project is substantial and review-ready for most of the analytical pipeline, but the voice intake layer still needs additional work before it can be presented as a fully accurate clinical interaction module.
 
 ---
 
@@ -433,9 +447,9 @@ Across the work completed so far, several important conclusions have emerged:
 - Trend features can be helpful in principle, but are not automatically beneficial in small structured datasets.
 - Explainability matters as much as predictive performance.
 - Transparent clinical rules are essential for safety and accountability.
-- Voice input can extend the system toward real field deployment.
+- Voice input is promising but still needs substantial improvement in accuracy before it is suitable for real clinical use.
 
-These findings are important because they show the project is not only producing a predictive model; it is building an understandable clinical support system.
+These findings are important because they show the project is not only producing a predictive model; it is building an understandable clinical support system, while also recognizing that the voice layer remains the weakest and most incomplete component.
 
 ---
 
@@ -506,12 +520,12 @@ This README is intentionally written for project review, viva presentation, and 
 - what the project learned,
 - how the pieces fit together as a full pipeline.
 
-A reviewer should be able to read this document and understand the progression from raw data -> baseline model -> optimization -> trajectory reasoning -> clustering -> explainability -> rules -> voice interface.
+A reviewer should be able to read this document and understand the progression from raw data -> baseline model -> optimization -> trajectory reasoning -> clustering -> explainability -> rules, while also recognizing that the voice interface is only a prototype and still needs to reach higher accuracy before it can be treated as a fully completed phase.
 
 ---
 
 ## Final note
 
-MaternaCare AI is already far beyond a simple prototype. It represents a layered research and engineering pipeline that combines prediction, robustness testing, interpretability, and field-use readiness.
+MaternaCare AI is already far beyond a simple prototype in its analytical and clinical-reasoning pipeline. It represents a layered research and engineering system that combines prediction, robustness testing, interpretability, and early field-use design.
 
-The work completed so far provides a strong foundation for the next stage of polishing, integration, and final deployment-oriented development.
+However, the voice interface remains the weakest link: it is implemented and integrated structurally, but it does not yet achieve the accuracy level required for clinical confidence. The next stage therefore needs focused validation, error analysis, and improvement of the ASR + parsing pipeline before claiming full completion of Phase 8.

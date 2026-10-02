@@ -38,12 +38,31 @@ MODEL_URL = f"https://alphacephei.com/vosk/models/{MODEL_NAME}.zip"
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models", MODEL_NAME)
 
 
+def _resolve_model_dir(model_dir: str) -> str:
+    """Return the actual Vosk model root, handling nested extraction layouts."""
+    if not os.path.isdir(model_dir):
+        return model_dir
+
+    required_dirs = ("am", "conf", "graph", "ivector")
+    if any(os.path.isdir(os.path.join(model_dir, folder)) for folder in required_dirs):
+        return model_dir
+
+    nested = os.path.join(model_dir, os.path.basename(model_dir))
+    if os.path.isdir(nested) and any(
+        os.path.isdir(os.path.join(nested, folder)) for folder in required_dirs
+    ):
+        return nested
+
+    return model_dir
+
+
 def ensure_model(model_dir: str = MODEL_DIR, model_url: str = MODEL_URL) -> str:
     """
     Download and unzip the Vosk small English model if not already present.
     Requires internet access to alphacephei.com — run this on a normal
     networked machine, not in this sandbox.
     """
+    model_dir = _resolve_model_dir(model_dir)
     if os.path.isdir(model_dir):
         return model_dir
 
@@ -57,7 +76,7 @@ def ensure_model(model_dir: str = MODEL_DIR, model_url: str = MODEL_URL) -> str:
         zf.extractall(os.path.dirname(model_dir))
     os.remove(zip_path)
 
-    return model_dir
+    return _resolve_model_dir(model_dir)
 
 
 def transcribe_wav(wav_path: str, model_dir: str = MODEL_DIR) -> str:
@@ -84,6 +103,7 @@ def transcribe_wav(wav_path: str, model_dir: str = MODEL_DIR) -> str:
     import vosk  # imported lazily so this module can be *read*/reviewed
                  # even in an environment where vosk isn't installed
 
+    model_dir = _resolve_model_dir(model_dir)
     if not os.path.isdir(model_dir):
         raise FileNotFoundError(
             f"Vosk model not found at {model_dir}. Call ensure_model() first "
@@ -129,6 +149,7 @@ def transcribe_microphone(model_dir: str = MODEL_DIR, duration_seconds: int = 8)
     import sounddevice as sd
     import vosk
 
+    model_dir = _resolve_model_dir(model_dir)
     if not os.path.isdir(model_dir):
         raise FileNotFoundError(
             f"Vosk model not found at {model_dir}. Call ensure_model() first."
