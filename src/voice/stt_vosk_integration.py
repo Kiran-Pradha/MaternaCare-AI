@@ -38,31 +38,12 @@ MODEL_URL = f"https://alphacephei.com/vosk/models/{MODEL_NAME}.zip"
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models", MODEL_NAME)
 
 
-def _resolve_model_dir(model_dir: str) -> str:
-    """Return the actual Vosk model root, handling nested extraction layouts."""
-    if not os.path.isdir(model_dir):
-        return model_dir
-
-    required_dirs = ("am", "conf", "graph", "ivector")
-    if any(os.path.isdir(os.path.join(model_dir, folder)) for folder in required_dirs):
-        return model_dir
-
-    nested = os.path.join(model_dir, os.path.basename(model_dir))
-    if os.path.isdir(nested) and any(
-        os.path.isdir(os.path.join(nested, folder)) for folder in required_dirs
-    ):
-        return nested
-
-    return model_dir
-
-
 def ensure_model(model_dir: str = MODEL_DIR, model_url: str = MODEL_URL) -> str:
     """
     Download and unzip the Vosk small English model if not already present.
     Requires internet access to alphacephei.com — run this on a normal
     networked machine, not in this sandbox.
     """
-    model_dir = _resolve_model_dir(model_dir)
     if os.path.isdir(model_dir):
         return model_dir
 
@@ -76,10 +57,60 @@ def ensure_model(model_dir: str = MODEL_DIR, model_url: str = MODEL_URL) -> str:
         zf.extractall(os.path.dirname(model_dir))
     os.remove(zip_path)
 
-    return _resolve_model_dir(model_dir)
+    return model_dir
 
 
-def transcribe_wav(wav_path: str, model_dir: str = MODEL_DIR) -> str:
+# ---------------------------------------------------------------------------
+# Vocabulary-restricted decoding
+# ---------------------------------------------------------------------------
+# The generic small English model has ~10% word error rate even on clear
+# native speech, because it's decoding against tens of thousands of
+# possible English words. But this app only ever needs to recognize a small,
+# fixed vocabulary: digits, a few number-words, and a handful of medical
+# terms. Vosk supports passing a JSON grammar to KaldiRecognizer that
+# restricts decoding to just that word list, which concentrates the
+# acoustic model's probability mass on the words that actually matter here
+# instead of splitting it across the full dictionary. This is the highest-
+# leverage accuracy fix for this specific use case — much more effective
+# than switching acoustic models, and it doesn't require a bigger download.
+#
+# NOTE: this was written and reasoned through in this sandbox but, like the
+# rest of this file, needs a live Vosk model to actually verify — run the
+# before/after WER comparison on a networked machine to confirm the
+# improvement holds for your own voice and mic.
+
+VITALS_VOCABULARY = [
+    # digits, spoken individually or compositionally
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+    "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+    "sixteen", "seventeen", "eighteen", "nineteen",
+    "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
+    "hundred", "point", "over",
+    # domain terms
+    "blood", "pressure", "sugar", "glucose", "systolic", "diastolic",
+    "temperature", "temp", "body",
+    "heart", "rate", "pulse", "bpm",
+    "age", "years", "hemoglobin", "haemoglobin",
+    "patient", "is", "the", "her", "his", "mmol", "degrees", "fahrenheit",
+    "[unk]",  # lets Vosk emit an explicit "out of vocabulary" token instead
+              # of forcing a bad guess, so you can see when something didn't
+              # fit the grammar rather than silently getting a wrong word
+]
+
+
+# Guided mode asks for ONE vital at a time, so the answer is only ever a number.
+# A numbers-only word list gives the recognizer far fewer ways to go wrong than
+# the full vitals vocabulary ("temperature" -> "rate sugar" can't happen).
+NUMBER_VOCABULARY = [
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+    "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+    "sixteen", "seventeen", "eighteen", "nineteen",
+    "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
+    "hundred", "point", "over", "[unk]",
+]
+
+
+def transcribe_wav(wav_path: str, model_dir: str = MODEL_DIR, restrict_vocabulary: bool = True) -> str:
     """
     Transcribe a mono 16-bit PCM .wav file to text using Vosk (fully offline
     once the model is downloaded — no per-request network call, unlike
@@ -93,6 +124,13 @@ def transcribe_wav(wav_path: str, model_dir: str = MODEL_DIR) -> str:
         out.wav`)
     model_dir : str
         Path to an unzipped Vosk model directory (see ensure_model()).
+    restrict_vocabulary : bool
+        If True (default), constrain recognition to VITALS_VOCABULARY —
+        recommended for this app, since it dramatically improves accuracy
+        on the small set of words a vitals reading actually uses. Set to
+        False to fall back to open-vocabulary recognition (e.g. for
+        debugging, or if a health worker says something outside the
+        expected vocabulary that you still want captured as best-effort).
 
     Returns
     -------
@@ -103,7 +141,6 @@ def transcribe_wav(wav_path: str, model_dir: str = MODEL_DIR) -> str:
     import vosk  # imported lazily so this module can be *read*/reviewed
                  # even in an environment where vosk isn't installed
 
-    model_dir = _resolve_model_dir(model_dir)
     if not os.path.isdir(model_dir):
         raise FileNotFoundError(
             f"Vosk model not found at {model_dir}. Call ensure_model() first "
@@ -118,7 +155,10 @@ def transcribe_wav(wav_path: str, model_dir: str = MODEL_DIR) -> str:
         )
 
     model = vosk.Model(model_dir)
-    rec = vosk.KaldiRecognizer(model, wf.getframerate())
+    if restrict_vocabulary:
+        rec = vosk.KaldiRecognizer(model, wf.getframerate(), json.dumps(VITALS_VOCABULARY))
+    else:
+        rec = vosk.KaldiRecognizer(model, wf.getframerate())
     rec.SetWords(True)
 
     full_text = []
@@ -138,18 +178,23 @@ def transcribe_wav(wav_path: str, model_dir: str = MODEL_DIR) -> str:
     return " ".join(full_text).strip()
 
 
-def transcribe_microphone(model_dir: str = MODEL_DIR, duration_seconds: int = 8) -> str:
+def transcribe_microphone(model_dir: str = MODEL_DIR, duration_seconds: int = 8,
+                           restrict_vocabulary: bool = True, vocabulary: list = None) -> str:
     """
     Live microphone capture + transcription, for field use on the team's
     laptop / an Android device running Vosk. Requires `sounddevice` in
     addition to `vosk` (pip install sounddevice), and an actual microphone
     — neither is available in this sandbox.
+
+    restrict_vocabulary: see transcribe_wav() — recommended True for this
+    app's fixed vitals vocabulary.
+    vocabulary: optional custom word list (e.g. NUMBER_VOCABULARY for guided
+    mode). Defaults to VITALS_VOCABULARY.
     """
     import queue
     import sounddevice as sd
     import vosk
 
-    model_dir = _resolve_model_dir(model_dir)
     if not os.path.isdir(model_dir):
         raise FileNotFoundError(
             f"Vosk model not found at {model_dir}. Call ensure_model() first."
@@ -162,7 +207,10 @@ def transcribe_microphone(model_dir: str = MODEL_DIR, duration_seconds: int = 8)
 
     model = vosk.Model(model_dir)
     samplerate = 16000
-    rec = vosk.KaldiRecognizer(model, samplerate)
+    if restrict_vocabulary:
+        rec = vosk.KaldiRecognizer(model, samplerate, json.dumps(vocabulary or VITALS_VOCABULARY))
+    else:
+        rec = vosk.KaldiRecognizer(model, samplerate)
 
     full_text = []
     with sd.RawInputStream(

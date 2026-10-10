@@ -54,107 +54,129 @@ _TENS = {
 }
 
 
-def _words_to_number(text: str) -> Optional[float]:
-    """Convert a short word-number phrase to a number.
+_DIGIT_WORDS = {w: v for w, v in _ONES.items() if v <= 9}
+_NUMBER_VOCAB = set(_ONES) | set(_TENS) | {"point", "hundred"}
+_PUNCT = ",.;:!?"
 
-    Two distinct spoken-number grammars are supported, and it matters which
-    one applies:
 
-    1. COMPOSITIONAL ("ninety eight", "thirty two", "eighty eight"): a tens
-       word optionally followed by a ones word, meaning tens+ones by
-       addition -> 98, 32, 88. This is standard English number-naming.
+def _parse_number_word_run(words):
+    """Turn a run of spoken number words into a list of numbers.
 
-    2. DIGIT-BY-DIGIT ("one four zero", "one two five"): people reading out
-       vitals often speak each digit separately, especially for 3-digit
-       numbers like blood pressure (a systolic of 140 read as "one four
-       zero" rather than "one hundred forty"). Here the correct
-       reconstruction is string concatenation of the digits -> "140", NOT
-       summing them (1+4+0=5, which is wrong and was a real bug caught
-       during testing on a live transcript: "one four zero over ninety"
-       was misparsed as systolic=5 instead of 140).
+    One run can hold SEVERAL numbers, e.g. when the recognizer drops the word
+    "over": "one four zero ninety" is really 140 and 90. Grammar, left to right:
 
-    Disambiguation rule: if any TENS word (twenty..ninety) appears in the
-    phrase, treat the whole phrase as compositional (standard grammar
-    requires a tens word for any 2-digit addition to make sense). If no
-    tens word appears and there are 2+ single-digit words in a row, treat
-    it as digit-by-digit reading. A lone teen/ones word is just that value.
+      * tens word (+ optional single digit)  -> ONE number   "ninety eight" = 98
+      * teen word                            -> ONE number   "twelve" = 12
+      * run of single digit words            -> ONE number   "one four zero" = 140
+        (digits read out one by one are JOINED, never added)
+      * "one"/"two" + tens word              -> hundreds     "one twenty" = 120
+      * digit + "hundred" (+ tens/ones)      -> hundreds     "one hundred five" = 105
+      * "point" + digit words                -> decimal      "seven point five" = 7.5
+
+    Returns None if a word doesn't fit the grammar.
     """
-    text = text.strip().lower()
-    if "point" in text:
-        whole_part, _, frac_part = text.partition("point")
-        whole = _words_to_number(whole_part)
-        if whole is None:
-            return None
-        frac_digits = []
-        for w in frac_part.strip().split():
-            if w in _ONES and _ONES[w] <= 9:
-                frac_digits.append(str(_ONES[w]))
-            else:
+    numbers, i, n = [], 0, len(words)
+    pending_hundred = False
+
+    def push(val):
+        nonlocal pending_hundred
+        if pending_hundred:
+            numbers[-1] += val
+            pending_hundred = False
+        else:
+            numbers.append(float(val))
+
+    while i < n:
+        w = words[i]
+        if w == "point":
+            j, digits = i + 1, []
+            while j < n and words[j] in _DIGIT_WORDS:
+                digits.append(str(_DIGIT_WORDS[words[j]]))
+                j += 1
+            if not digits:
                 return None
-        if not frac_digits:
-            return whole
-        return float(f"{int(whole)}.{''.join(frac_digits)}")
-
-    tokens = [t for t in text.split() if t != "and"]
-    if not tokens:
-        return None
-
-    has_tens = any(t in _TENS for t in tokens)
-
-    if has_tens:
-        # Compositional: sum tens + ones (e.g. "ninety eight" -> 90+8=98)
-        total = 0
-        matched = False
-        for tok in tokens:
-            if tok in _TENS:
-                total += _TENS[tok]
-                matched = True
-            elif tok in _ONES:
-                total += _ONES[tok]
-                matched = True
+            frac = "".join(digits)
+            if numbers:
+                numbers[-1] = float(f"{int(numbers[-1])}.{frac}")
             else:
+                numbers.append(float(f"0.{frac}"))
+            pending_hundred = False
+            i = j
+        elif w == "hundred":
+            if not numbers or numbers[-1] >= 10 or pending_hundred:
                 return None
-        return float(total) if matched else None
-
-    if len(tokens) == 1:
-        # Single word: teens (ten..nineteen) or a single digit stand alone
-        tok = tokens[0]
-        return float(_ONES[tok]) if tok in _ONES else None
-
-    # No tens word, multiple tokens: digit-by-digit reading. Each token must
-    # be a single digit (zero..nine) — a teen word here (e.g. "twelve") is
-    # ambiguous/unsupported in this mode and bails out rather than guessing.
-    digits = []
-    for tok in tokens:
-        if tok in _ONES and _ONES[tok] <= 9:
-            digits.append(str(_ONES[tok]))
+            numbers[-1] *= 100
+            pending_hundred = True
+            i += 1
+        elif w in _TENS:
+            val = _TENS[w]
+            if i + 1 < n and words[i + 1] in _DIGIT_WORDS and _DIGIT_WORDS[words[i + 1]] >= 1:
+                val += _DIGIT_WORDS[words[i + 1]]
+                i += 1
+            push(val)
+            i += 1
+        elif w in _ONES and _ONES[w] >= 10:
+            push(_ONES[w])
+            i += 1
+        elif w in _DIGIT_WORDS:
+            if pending_hundred:                       # "one hundred five"
+                push(_DIGIT_WORDS[w])
+                i += 1
+                continue
+            digits = []
+            while i < n and words[i] in _DIGIT_WORDS:
+                digits.append(str(_DIGIT_WORDS[words[i]]))
+                i += 1
+            if len(digits) == 1 and digits[0] in ("1", "2") and i < n and words[i] in _TENS:
+                val = _TENS[words[i]]                 # "one twenty (eight)"
+                i += 1
+                if i < n and words[i] in _DIGIT_WORDS and _DIGIT_WORDS[words[i]] >= 1:
+                    val += _DIGIT_WORDS[words[i]]
+                    i += 1
+                numbers.append(float(int(digits[0]) * 100 + val))
+            else:
+                numbers.append(float("".join(digits)))
         else:
             return None
-    return float("".join(digits)) if digits else None
+    return numbers
 
 
-_NUMBER_WORD_PATTERN = re.compile(
-    r"\b((?:(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|"
-    r"twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|"
-    r"twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\s*)+"
-    r"(?:point\s+(?:zero|one|two|three|four|five|six|seven|eight|nine)(?:\s+"
-    r"(?:zero|one|two|three|four|five|six|seven|eight|nine))*)?)\b",
-    re.IGNORECASE,
-)
+def _words_to_number(text: str) -> Optional[float]:
+    """Convert a phrase that holds exactly ONE spoken number to that number
+    ('ninety eight point six' -> 98.6, 'one four zero' -> 140). Returns None
+    if the phrase isn't a number or holds more than one."""
+    nums = _parse_number_word_run(text.strip().lower().split())
+    return nums[0] if nums and len(nums) == 1 else None
+
+
+def _fmt_number(x: float) -> str:
+    return str(int(x)) if x == int(x) else str(x)
 
 
 def _normalize_word_numbers(text: str) -> str:
-    """Replace spoken word-numbers in the text with digit strings, e.g.
-    'ninety eight point six' -> '98.6'. Leaves digit numbers untouched."""
-    def _sub(m):
-        val = _words_to_number(m.group(1))
-        if val is None:
-            return m.group(0)
-        if val == int(val):
-            return str(int(val))
-        return str(val)
-
-    return _NUMBER_WORD_PATTERN.sub(_sub, text)
+    """Replace spoken number words with digits, e.g. 'ninety eight point six'
+    -> '98.6' and 'one four zero ninety' -> '140 90'. Other words and
+    existing digits are left untouched."""
+    tokens = text.split()
+    out, i = [], 0
+    while i < len(tokens):
+        if tokens[i].lower().strip(_PUNCT) in _NUMBER_VOCAB:
+            j, run = i, []
+            while j < len(tokens) and tokens[j].lower().strip(_PUNCT) in _NUMBER_VOCAB:
+                run.append(tokens[j].lower().strip(_PUNCT))
+                j += 1
+                if tokens[j - 1][-1] in _PUNCT:   # punctuation ends the run
+                    break
+            nums = _parse_number_word_run(run)
+            if nums:
+                out.extend(_fmt_number(x) for x in nums)
+            else:
+                out.extend(tokens[i:j])
+            i = j
+        else:
+            out.append(tokens[i])
+            i += 1
+    return " ".join(out)
 
 
 # ---------------------------------------------------------------------------
@@ -202,25 +224,35 @@ _NUM = r"(\d+(?:\.\d+)?)"
 _PATTERNS = {
     # BP: handle "140 over 90", "140/90", "systolic 140 diastolic 90" separately
     "bp_combined": re.compile(
-        rf"(?:blood\s*pressure|bp)\D{{0,10}}{_NUM}\s*(?:over|/|-)\s*{_NUM}", re.IGNORECASE
+        rf"\b(?:blood\s*pressure|bp)\D{{0,10}}{_NUM}\s*(?:over|/|-)\s*{_NUM}", re.IGNORECASE
     ),
     "bp_bare_combined": re.compile(rf"{_NUM}\s*(?:over|/)\s*{_NUM}\s*(?:mm\s*hg)?", re.IGNORECASE),
+    # speech recognizers often drop the word "over": "blood pressure 140 90"
+    "bp_no_over": re.compile(rf"\b(?:blood\s*pressure|bp)\D{{0,10}}{_NUM}\s+{_NUM}\b", re.IGNORECASE),
     "systolic": re.compile(rf"systolic\D{{0,10}}{_NUM}", re.IGNORECASE),
     "diastolic": re.compile(rf"diastolic\D{{0,10}}{_NUM}", re.IGNORECASE),
     "age": re.compile(rf"\bage\D{{0,10}}{_NUM}\s*(?:years?)?", re.IGNORECASE),
     "bs": re.compile(
-        rf"(?:blood\s*sugar|glucose|bs)\D{{0,10}}{_NUM}\s*(?:mmol\s*/?\s*l)?", re.IGNORECASE
+        rf"\b(?:blood\s*sugar|glucose|bs)\D{{0,10}}{_NUM}\s*(?:mmol\s*/?\s*l)?", re.IGNORECASE
     ),
     "temp": re.compile(
-        rf"(?:body\s*temp(?:erature)?|temp(?:erature)?)\D{{0,10}}{_NUM}\s*(?:f|fahrenheit)?", re.IGNORECASE
+        rf"\b(?:body\s*temp(?:erature)?|temp(?:erature)?)\D{{0,10}}{_NUM}\s*(?:f|fahrenheit)?", re.IGNORECASE
     ),
     "hr": re.compile(
-        rf"(?:heart\s*rate|pulse|hr)\D{{0,10}}{_NUM}\s*(?:bpm|beats)?", re.IGNORECASE
+        rf"\b(?:heart\s*rate|pulse|hr)\D{{0,10}}{_NUM}\s*(?:bpm|beats)?", re.IGNORECASE
     ),
     "hb": re.compile(
-        rf"(?:hemoglobin|haemoglobin|hb)\D{{0,10}}{_NUM}\s*(?:g\s*/?\s*dl)?", re.IGNORECASE
+        rf"\b(?:hemoglobin|haemoglobin|hb)\D{{0,10}}{_NUM}\s*(?:g\s*/?\s*dl)?", re.IGNORECASE
     ),
 }
+
+
+def _bp_pair_ok(m) -> bool:
+    """True if a regex match holds a believable (systolic, diastolic) pair."""
+    if not m:
+        return False
+    sys_, dia = float(m.group(1)), float(m.group(2))
+    return 60 <= sys_ <= 260 and 30 <= dia <= 160 and sys_ > dia
 
 
 def parse_vitals_from_text(transcript: str) -> ParsedVitals:
@@ -247,6 +279,10 @@ def parse_vitals_from_text(transcript: str) -> ParsedVitals:
     if m:
         result.SystolicBP = float(m.group(1))
         result.DiastolicBP = float(m.group(2))
+    elif _bp_pair_ok(_PATTERNS["bp_no_over"].search(text)):
+        m2 = _PATTERNS["bp_no_over"].search(text)
+        result.SystolicBP = float(m2.group(1))
+        result.DiastolicBP = float(m2.group(2))
     else:
         m_sys = _PATTERNS["systolic"].search(text)
         m_dia = _PATTERNS["diastolic"].search(text)
@@ -323,6 +359,58 @@ def format_confirmation_prompt(vitals: ParsedVitals) -> str:
     if vitals.warnings:
         msg += " Warning: some values look unusual, please double check."
     return msg
+
+
+# ---------------------------------------------------------------------------
+# Guided mode: the computer asks for ONE vital at a time, so the answer is just
+# a number and no keyword ("temperature", "over") has to be recognized.
+# ---------------------------------------------------------------------------
+
+GUIDED_FIELDS = [
+    ("Age", "age in years"),
+    ("BP", "blood pressure, top number then bottom number"),
+    ("BS", "blood sugar"),
+    ("BodyTemp", "body temperature in Fahrenheit"),
+    ("HeartRate", "heart rate"),
+]
+
+
+def parse_field_value(transcript: str, field: str):
+    """Parse the answer to a single question.
+
+    field is one of Age, BS, BodyTemp, HeartRate, Hemoglobin, or "BP".
+    Returns (value, None) on success, where value is a float (for "BP" a
+    (systolic, diastolic) tuple), or (None, reason) if the answer can't be
+    trusted. Nothing out of range is ever accepted here: the health worker is
+    asked again instead.
+    """
+    text = _normalize_word_numbers(transcript or "")
+    nums = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", text)]
+
+    if field == "BP":
+        if len(nums) != 2:
+            return None, "I need two numbers: the top number, then the bottom number."
+        sys_, dia = nums
+        for name, v in (("SystolicBP", sys_), ("DiastolicBP", dia)):
+            lo, hi = VALID_RANGES[name]
+            if not lo <= v <= hi:
+                return None, f"{v:g} looks wrong for {name} (expected {lo}-{hi})."
+        if sys_ <= dia:
+            return None, "The top number must be bigger than the bottom number."
+        return (sys_, dia), None
+
+    if not nums:
+        return None, "I did not catch a number."
+    if len(nums) > 1:
+        return None, "I heard more than one number: " + ", ".join(f"{x:g}" for x in nums) + "."
+    v = nums[0]
+    lo, hi = VALID_RANGES[field]
+    if not lo <= v <= hi:
+        hint = ""
+        if field == "BodyTemp" and 34 <= v <= 42:
+            hint = " That looks like Celsius; please say the temperature in Fahrenheit."
+        return None, f"{v:g} looks wrong for {field} (expected {lo:g}-{hi:g})." + hint
+    return v, None
 
 
 if __name__ == "__main__":

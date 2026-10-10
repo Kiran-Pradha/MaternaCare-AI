@@ -25,7 +25,6 @@ Usage
 
 import os
 import subprocess
-import sys
 import tempfile
 
 try:
@@ -36,82 +35,71 @@ except ImportError:
 
 
 def _get_engine(rate: int = 165, volume: float = 1.0):
-    """Create a pyttsx3 engine using the best available local driver.
-
-    On Linux, espeak/espeak-ng is the expected backend. On Windows,
-    pyttsx3 should use the built-in SAPI5 driver if available. Falling back
-    to the default init() call allows the project to run in the current
-    environment without an explicit system package install.
+    """Create a pyttsx3 engine bound to the espeak driver.
 
     rate: words per minute (165 is a clear, not-rushed pace for field use)
     volume: 0.0-1.0
     """
-    driver_names = []
-    if os.name == "nt":
-        driver_names = ["sapi5", "espeak"]
-    elif sys.platform == "darwin":
-        driver_names = ["nsss", "espeak"]
-    else:
-        driver_names = ["espeak", "sapi5"]
-
-    last_exc = None
-    for driver_name in driver_names:
-        try:
-            if driver_name is None:
-                engine = pyttsx3.init()
-            else:
-                engine = pyttsx3.init(driverName=driver_name)
-            engine.setProperty("rate", rate)
-            engine.setProperty("volume", volume)
-            return engine
-        except Exception as exc:  # pragma: no cover - OS-availability path
-            last_exc = exc
-
-    # Last resort: let pyttsx3 auto-detect the best installed driver.
     try:
-        engine = pyttsx3.init()
-        engine.setProperty("rate", rate)
-        engine.setProperty("volume", volume)
-        return engine
-    except Exception as exc:  # pragma: no cover - final fallback guard
-        last_exc = exc
+        engine = pyttsx3.init(driverName="espeak")   # Linux / Mac with espeak installed
+    except Exception:
+        engine = pyttsx3.init()                      # Windows (SAPI5) or the platform default
+    engine.setProperty("rate", rate)
+    engine.setProperty("volume", volume)
+    return engine
 
-    raise RuntimeError(
-        "No compatible pyttsx3 TTS driver is available on this machine. "
-        "Install a system TTS backend or configure pyttsx3 to use a supported driver."
-    ) from last_exc
+
+def _wav_ok(path: str) -> bool:
+    return os.path.exists(path) and os.path.getsize(path) > 1000
 
 
 def save_offline_wav(text: str, out_path: str, rate: int = 165) -> str:
     """
-    Render `text` to a .wav file at `out_path` using the offline espeak
-    backend. Returns out_path. Does not require a display, speakers, or
-    network — safe to call in a headless / CI / sandbox environment, which
-    is exactly why this is the path exercised by the automated tests below
-    rather than speak_offline() (which requires an actual audio device).
+    Render `text` to a .wav file at `out_path` using offline speech synthesis
+    (no network, no speakers needed). Returns out_path.
+
+    pyttsx3 sometimes finishes without writing the file (the first file in a
+    fresh process is the usual victim), so the result is CHECKED: if the file
+    is missing, try again once, then fall back to the espeak command-line tool.
+    Raises RuntimeError only if every route failed, never fails silently.
     """
     if not _PYTTSX3_AVAILABLE:
         raise RuntimeError("pyttsx3 is not installed. Run: pip install pyttsx3")
-    engine = _get_engine(rate=rate)
-    engine.save_to_file(text, out_path)
-    engine.runAndWait()
-    return out_path
+
+    for _ in range(2):
+        try:
+            engine = _get_engine(rate=rate)
+            engine.save_to_file(text, out_path)
+            engine.runAndWait()
+        except Exception:
+            pass
+        if _wav_ok(out_path):
+            return out_path
+
+    try:
+        save_offline_wav_via_cli(text, out_path, wpm=rate)
+    except Exception:
+        pass
+    if _wav_ok(out_path):
+        return out_path
+    raise RuntimeError(f"Could not create speech audio at {out_path}")
 
 
 def save_offline_wav_via_cli(text: str, out_path: str, wpm: int = 165) -> str:
     """
-    Fallback / alternative path that shells out to the `espeak` CLI directly
-    instead of going through pyttsx3. Useful if pyttsx3's engine loop ever
-    misbehaves in a particular deployment environment (a known class of
-    issue on some headless Linux setups) — this path has one less
-    abstraction layer between the code and the audio.
+    Fallback path that calls the espeak command-line tool directly instead of
+    going through pyttsx3. One less layer, so it is more dependable on some
+    setups. Tries `espeak-ng` first, then `espeak`.
     """
-    subprocess.run(
-        ["espeak", "-s", str(wpm), "-w", out_path, text],
-        check=True,
-        capture_output=True,
-    )
-    return out_path
+    last_error = None
+    for exe in ("espeak-ng", "espeak"):
+        try:
+            subprocess.run([exe, "-s", str(wpm), "-w", out_path, text],
+                           check=True, capture_output=True)
+            return out_path
+        except (FileNotFoundError, subprocess.CalledProcessError) as e:
+            last_error = e
+    raise RuntimeError(f"espeak command-line tool not available: {last_error}")
 
 
 def speak_offline(text: str, rate: int = 165) -> None:

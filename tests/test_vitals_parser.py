@@ -70,6 +70,27 @@ CASES = [
         dict(HeartRate=125.0),
     ),
     (
+        # REAL Vosk output from the user's live run: the recognizer dropped the
+        # words "age" and "over". BP must still be 140/90 (NOT 1+4+0+90 = 95),
+        # and age must stay empty rather than being guessed.
+        "thirty two blood pressure one four zero ninety blood sugar seven point five",
+        dict(SystolicBP=140.0, DiastolicBP=90.0, BS=7.5),
+    ),
+    (
+        # REAL Vosk output: "temperature" was misheard, so no temp is claimed
+        "rate sugar ninety eight point six heart rate eighty eight",
+        dict(HeartRate=88.0),
+    ),
+    (
+        # common spoken styles for 120/80
+        "blood pressure one twenty over eighty",
+        dict(SystolicBP=120.0, DiastolicBP=80.0),
+    ),
+    (
+        "blood pressure one hundred twenty over eighty",
+        dict(SystolicBP=120.0, DiastolicBP=80.0),
+    ),
+    (
         # compositional still must not regress: "eighty eight" = 80+8=88,
         # not digit-concatenated to 808
         "heart rate eighty eight",
