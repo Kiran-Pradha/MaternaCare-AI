@@ -91,20 +91,67 @@ EXAMPLES = {
 # --------------------------------------------------------------------------
 # Model, explanations, trajectory
 # --------------------------------------------------------------------------
-def find_dataset():
-    data_dir = os.path.join(ROOT, "data")
-    if not os.path.isdir(data_dir):
+REQUIRED_COLUMNS = ["Age", "SystolicBP", "DiastolicBP", "BS", "BodyTemp", "HeartRate", "RiskLevel"]
+_COLUMN_ALIASES = {  # normalised header (lower-case, letters+digits only) -> canonical name
+    "age": "Age", "systolicbp": "SystolicBP", "diastolicbp": "DiastolicBP", "bs": "BS",
+    "bodytemp": "BodyTemp", "heartrate": "HeartRate", "risklevel": "RiskLevel",
+    "bodytemperature": "BodyTemp", "bloodsugar": "BS", "risk": "RiskLevel",
+}
+_SKIP_DIRS = {".git", ".venv", "venv", "env", "node_modules", "__pycache__", "site-packages", ".idea"}
+
+
+def _canonical_columns(columns):
+    """Map whatever headers the CSV has onto the standard names, ignoring case, spaces, _ and -."""
+    mapping = {}
+    for c in columns:
+        key = "".join(ch for ch in str(c).lower() if ch.isalnum())
+        if key in _COLUMN_ALIASES:
+            mapping[c] = _COLUMN_ALIASES[key]
+    return mapping
+
+
+def read_dataset(path, nrows=None):
+    """Read a CSV and return it with standard column names, or None if it isn't the dataset."""
+    for enc in ("utf-8-sig", "latin-1"):
+        try:
+            df = pd.read_csv(path, encoding=enc, nrows=nrows)
+            break
+        except Exception:
+            df = None
+    if df is None:
         return None
-    for name in sorted(os.listdir(data_dir)):
-        if name.lower().endswith(".csv"):
-            path = os.path.join(data_dir, name)
-            try:
-                head = pd.read_csv(path, nrows=2, encoding="utf-8-sig")
-            except Exception:
-                continue
-            if {"RiskLevel", "SystolicBP", "DiastolicBP"}.issubset(head.columns):
-                return path
-    return None
+    df = df.rename(columns=_canonical_columns(df.columns))
+    return df if set(REQUIRED_COLUMNS).issubset(df.columns) else None
+
+
+def find_dataset():
+    """Look for the Maternal Health Risk CSV: first under data/ (any depth), then anywhere in
+    the project. Returns (path_or_None, checked) where `checked` lists every CSV looked at and
+    the columns it had, so a failure can be explained instead of silent."""
+    checked = []
+    roots = [os.path.join(ROOT, "data"), ROOT]
+    seen = set()
+    for top in roots:
+        if not os.path.isdir(top):
+            continue
+        for folder, dirs, files in os.walk(top):
+            dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
+            for name in sorted(files):
+                if not name.lower().endswith(".csv"):
+                    continue
+                path = os.path.join(folder, name)
+                if path in seen:
+                    continue
+                seen.add(path)
+                df = read_dataset(path, nrows=3)
+                if df is not None:
+                    return path, checked
+                try:
+                    cols = list(pd.read_csv(path, nrows=1, encoding="utf-8-sig").columns)
+                except Exception as e:
+                    cols = [f"(unreadable: {type(e).__name__})"]
+                checked.append((os.path.relpath(path, ROOT), cols))
+    return None, checked
 
 
 @st.cache_resource(show_spinner="Training the risk model on the maternal-health dataset ...")
@@ -116,7 +163,7 @@ def load_model(csv_path):
     attribute holding "Low Risk" / "Mid Risk" / "High Risk", and to be trained on
     a DataFrame with the columns in FEATURES.
     """
-    df = pd.read_csv(csv_path, encoding="utf-8-sig")
+    df = read_dataset(csv_path)
     df["RiskLevel"] = df["RiskLevel"].str.strip().str.title()
     # drop the implausible rows found in the data audit (Age > 60, heart rate < 30)
     df = df[(df["Age"] <= 60) & (df["HeartRate"] >= 30)]
@@ -311,7 +358,7 @@ for i in range(3):
     for suffix, v in zip(("sbp", "dbp", "bs", "temp", "hr"), (118, 76, 7.0, 98.0, 74)):
         st.session_state.setdefault(f"pv{i}_{suffix}", v)
 
-csv_path = find_dataset()
+csv_path, _checked = find_dataset()
 
 with st.sidebar:
     st.header("MaternaCare AI")
@@ -327,15 +374,33 @@ with st.sidebar:
     )
     st.warning("Prototype for a capstone project. It supports, and never replaces, "
                "clinical judgement. Not a medical device.")
-    if csv_path is None:
-        st.error("Dataset not found in the data/ folder.")
-        up = st.file_uploader("Upload the Maternal Health Risk CSV", type="csv")
-        if up is not None:
-            os.makedirs(os.path.join(ROOT, "data"), exist_ok=True)
-            with open(os.path.join(ROOT, "data", "maternal_health_risk_data.csv"), "wb") as f:
-                f.write(up.getbuffer())
+
+if csv_path is None:
+    st.title("\U0001F930 MaternaCare AI")
+    st.error("I could not find the Maternal Health Risk dataset.")
+    st.markdown(
+        f"I looked in `{os.path.join(ROOT, 'data')}` (and the rest of the project folder) for a CSV "
+        "with these columns: **" + ", ".join(REQUIRED_COLUMNS) + "**."
+    )
+    if _checked:
+        st.markdown("CSV files I found, but they did not match:")
+        for rel, cols in _checked:
+            st.code(f"{rel}\ncolumns: {cols}")
+    else:
+        st.markdown("I found no CSV files at all.")
+    st.markdown("**Fix:** copy the dataset CSV into the `data` folder, or upload it here:")
+    up = st.file_uploader("Maternal Health Risk CSV", type="csv")
+    if up is not None:
+        os.makedirs(os.path.join(ROOT, "data"), exist_ok=True)
+        target = os.path.join(ROOT, "data", "maternal_health_risk_data.csv")
+        with open(target, "wb") as f:
+            f.write(up.getbuffer())
+        if read_dataset(target) is None:
+            os.remove(target)
+            st.error("That file does not have the expected columns, so it was not saved.")
+        else:
             st.rerun()
-        st.stop()
+    st.stop()
 
 clf, n_train = load_model(csv_path)
 explainer = load_explainer(clf)
@@ -393,6 +458,8 @@ with c3:
 
 # ---- 2. previous visits / trajectory ---------------------------------------
 st.subheader("2. Previous visits (optional)")
+st.caption("If you add previous visits, replace the boxes' starting numbers with the patient's REAL "
+           "earlier readings. The trajectory, and so the urgency, is calculated from them.")
 t1, t2 = st.columns([1, 2])
 with t1:
     st.selectbox("Number of previous visits", [0, 1, 2, 3], key="n_prev")
@@ -478,6 +545,11 @@ m1.metric("Predicted risk level", risk_level)
 m2.metric("Trajectory", rec["trajectory_pattern"])
 m3.metric("Overall urgency", f"{rec['overall_urgency']} / 4")
 
+if scores:
+    st.caption(f"Trajectory was auto-detected from the {n_prev} previous visit(s) entered in section 2. "
+               "If those numbers are not the patient's real earlier readings, the trajectory and urgency "
+               "are not valid. Open \u201cHow the trajectory was decided\u201d below to check.")
+
 left, right = st.columns(2)
 with left:
     st.markdown("#### Recommended action")
@@ -501,7 +573,9 @@ with left:
 
 with right:
     st.markdown("#### How confident is the model?")
-    st.bar_chart(pd.Series(probs, name="probability"))
+    for _c in CLASS_ORDER:
+        st.write(f"{_c}: **{probs[_c]:.0%}**")
+        st.progress(min(max(probs[_c], 0.0), 1.0))
 
     st.markdown("#### Why this risk level? (SHAP)")
     if top:
@@ -515,6 +589,10 @@ with right:
 with st.expander(f"How the trajectory was decided ({how})"):
     if scores:
         labels = [f"Visit {i + 1}" for i in range(len(scores) - 1)] + ["Current"]
+        _used = pd.DataFrame(prev_visits + [current], index=labels)[
+            ["SystolicBP", "DiastolicBP", "BS", "BodyTemp", "HeartRate"]]
+        _used["risk score"] = [round(x, 2) for x in scores]
+        st.dataframe(_used)
         st.line_chart(pd.Series(scores, index=labels, name="risk score"))
         st.caption("Risk score per visit = P(High) + 0.5 \u00d7 P(Mid), from the ML model. "
                    f"A jump of \u2265 {SUDDEN_STEP:g} in the last step means sudden deterioration; "
