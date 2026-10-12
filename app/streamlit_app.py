@@ -20,8 +20,10 @@ Pieces and where they come from
 * Risk model .......... a Random Forest trained at start-up on the dataset in data/
                         (see load_model(): swap in your GA-curated model there)
 * Explanations ........ SHAP TreeExplainer on that model (Phase 6 style)
-* Trajectory .......... detect_trajectory() below: a transparent stand-in for the
-                        Phase 4 pattern classifier (see the note on that function)
+* Trajectory .......... src/models/trajectory_classifier.py: a classifier trained on the
+                        SYNTHETIC multi-visit trajectories (the only place "change across
+                        visits" exists, since the real data has one visit per patient).
+                        Falls back to a simple heuristic if that module is unavailable.
 """
 
 import json
@@ -37,7 +39,8 @@ from sklearn.ensemble import RandomForestClassifier
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(APP_DIR)
-for _p in (ROOT, os.path.join(ROOT, "src", "voice")):
+for _p in (ROOT, os.path.join(ROOT, "src", "voice"), os.path.join(ROOT, "src", "data"),
+           os.path.join(ROOT, "src", "models")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -48,6 +51,12 @@ try:                                    # Phase 8 text parsing (pure Python, no 
     PARSER_OK = True
 except Exception:                       # app still works with typed input only
     PARSER_OK = False
+
+try:                                    # trajectory classifier (trained on synthetic trajectories)
+    from trajectory_classifier import TrajectoryClassifier  # noqa: E402
+    TRAJ_OK = True
+except Exception:
+    TRAJ_OK = False
 
 FEATURES = ["Age", "SystolicBP", "DiastolicBP", "BS", "BodyTemp", "HeartRate"]
 CLASS_ORDER = ["Low Risk", "Mid Risk", "High Risk"]
@@ -179,6 +188,20 @@ def load_explainer(_clf):
         return shap.TreeExplainer(_clf)
     except Exception:
         return None
+
+
+@st.cache_resource(show_spinner="Training the trajectory classifier on simulated multi-visit patients ...")
+def load_trajectory_model(csv_path):
+    """Train on synthetic trajectories (visit 1 = a real row, later visits simulated) and
+    evaluate on fresh simulated patients. Returns (classifier, evaluation) or (None, None)."""
+    if not TRAJ_OK:
+        return None, None
+    try:
+        real = read_dataset(csv_path)
+        tc = TrajectoryClassifier().fit(real)
+        return tc, tc.evaluate(real)
+    except Exception:
+        return None, None
 
 
 def predict_probs(clf, row):
@@ -403,10 +426,16 @@ if csv_path is None:
     st.stop()
 
 clf, n_train = load_model(csv_path)
+traj_clf, traj_eval = load_trajectory_model(csv_path)
 explainer = load_explainer(clf)
 with st.sidebar:
     st.caption(f"Risk model: Random Forest trained on {n_train} records "
                f"(about 84% cross-validated accuracy in our experiments).")
+    if traj_clf is not None:
+        st.caption(f"Trajectory model: Random Forest trained on {traj_clf.n_train} simulated "
+                   f"multi-visit patients ({traj_eval['accuracy']:.0%} on fresh simulated patients).")
+    else:
+        st.caption("Trajectory model unavailable: using the simple fallback heuristic.")
 
 st.title("\U0001F930 MaternaCare AI")
 st.caption("Enter the patient's vitals, confirm them, and get a risk assessment with a recommended action.")
@@ -505,13 +534,17 @@ if current["SystolicBP"] <= current["DiastolicBP"]:
 probs = predict_probs(clf, current)
 risk_level = max(probs, key=probs.get)
 
+traj_probs, scores = None, None
 if manual_pattern:
-    pattern, scores, how = manual_pattern, None, "chosen manually"
+    pattern, how = manual_pattern, "chosen manually"
 elif n_prev == 0:
-    pattern, scores, how = "Stable", None, "no previous visits entered, so assumed Stable"
+    pattern, how = "Stable", "no previous visits entered, so assumed Stable"
+elif traj_clf is not None:
+    pattern, traj_probs = traj_clf.predict(prev_visits + [current])
+    how = "auto-detected by the trajectory classifier from the visits entered"
 else:
     pattern, scores = detect_trajectory(clf, prev_visits + [current])
-    how = "auto-detected from the visits entered"
+    how = "auto-detected by the fallback heuristic from the visits entered"
 
 top = shap_top_factors(explainer, clf, current, risk_level)
 hb = st.session_state["hb"] if st.session_state["use_hb"] else None
@@ -545,10 +578,14 @@ m1.metric("Predicted risk level", risk_level)
 m2.metric("Trajectory", rec["trajectory_pattern"])
 m3.metric("Overall urgency", f"{rec['overall_urgency']} / 4")
 
-if scores:
-    st.caption(f"Trajectory was auto-detected from the {n_prev} previous visit(s) entered in section 2. "
-               "If those numbers are not the patient's real earlier readings, the trajectory and urgency "
-               "are not valid. Open \u201cHow the trajectory was decided\u201d below to check.")
+if traj_probs or scores:
+    _conf = ""
+    if traj_probs:
+        _top = traj_probs[pattern]
+        _conf = f" Pattern confidence: {_top:.0%}" + (" (LOW: treat the trajectory with caution)." if _top < 0.5 else ".")
+    st.caption(f"Trajectory was auto-detected from the {n_prev} previous visit(s) entered in section 2."
+               f"{_conf} If those numbers are not the patient's real earlier readings, the trajectory "
+               "and urgency are not valid. Open \u201cHow the trajectory was decided\u201d below to check.")
 
 left, right = st.columns(2)
 with left:
@@ -587,7 +624,23 @@ with right:
         st.caption("SHAP explanations are not available (the shap package is not installed).")
 
 with st.expander(f"How the trajectory was decided ({how})"):
-    if scores:
+    if traj_probs:
+        _labels = [f"Previous visit {i + 1}" for i in range(len(prev_visits))] + ["Current visit"]
+        st.dataframe(pd.DataFrame(prev_visits + [current], index=_labels)[
+            ["SystolicBP", "DiastolicBP", "BS", "BodyTemp", "HeartRate"]])
+        st.markdown("Probability of each pattern, from the trajectory classifier:")
+        for _pat in PATTERNS:
+            st.write(f"{_pat}: **{traj_probs[_pat]:.0%}**")
+            st.progress(min(max(traj_probs[_pat], 0.0), 1.0))
+        _len_acc = traj_eval["per_length"].get(n_prev + 1)
+        st.caption(
+            f"The classifier was trained on {traj_clf.n_train} SIMULATED patients (visit 1 taken from a real "
+            f"record, later visits simulated), and looks only at how the readings change between visits. On "
+            f"fresh simulated patients it was {traj_eval['accuracy']:.0%} accurate overall"
+            + (f" ({_len_acc:.0%} for {n_prev + 1}-visit trajectories)" if _len_acc else "") +
+            ". Those are patterns the simulation planted, so this is a proof of concept until it is "
+            "checked on real follow-up data. Slow trends are the hardest to tell apart from a stable patient.")
+    elif scores:
         labels = [f"Visit {i + 1}" for i in range(len(scores) - 1)] + ["Current"]
         _used = pd.DataFrame(prev_visits + [current], index=labels)[
             ["SystolicBP", "DiastolicBP", "BS", "BodyTemp", "HeartRate"]]

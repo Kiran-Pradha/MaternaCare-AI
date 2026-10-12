@@ -43,7 +43,6 @@ reports pass/fail rather than assuming the generator worked:
 
 import os
 import sys
-from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -69,12 +68,14 @@ DRIFT_FRACTION_OF_STD = {
 }
 
 
-def _load_clean_real_data(csv_path: str) -> pd.DataFrame:
+def _load_clean_real_data(csv_path) -> pd.DataFrame:
     """Real dataset with the implausible rows (found by data_validation.py)
     excluded, so synthetic generation bootstraps only from trustworthy
-    anchors."""
-    df = pd.read_csv(csv_path)
-    df["RiskLevel"] = df["RiskLevel"].str.strip().str.lower()
+    anchors. `csv_path` may be a file path or an already-loaded DataFrame
+    (the app passes a DataFrame so odd CSV headers have been fixed first)."""
+    df = csv_path.copy() if isinstance(csv_path, pd.DataFrame) else pd.read_csv(csv_path)
+    if "RiskLevel" in df.columns:
+        df["RiskLevel"] = df["RiskLevel"].astype(str).str.strip().str.lower()
     validated = validate_dataframe(df)
     clean = df.loc[~validated["any_implausible"]].reset_index(drop=True)
     return clean
@@ -84,8 +85,17 @@ def _real_std(clean_df: pd.DataFrame) -> dict:
     return {col: float(clean_df[col].std()) for col in FEATURES}
 
 
-def generate_trajectories(csv_path: str, n_patients: int = 300, n_visits: int = 4,
-                           risk_informed_fraction: float = 0.4, seed: int = 42) -> pd.DataFrame:
+# Size of the one-visit jump for the "sudden" pattern, in units of each vital's real-world
+# standard deviation (so BP jumps ~9-37 mmHg, blood sugar ~1.7-6.6 mmol/L, heart rate ~4-16 bpm).
+# These magnitudes are ASSUMPTIONS made for the simulation, not clinical measurements.
+SUDDEN_JUMP_STD_RANGE = (0.5, 2.0)
+SUDDEN_JUMP_VITALS = ("SystolicBP", "DiastolicBP", "BS", "HeartRate")
+
+
+def generate_trajectories(csv_path, n_patients: int = 300, n_visits: int = 4,
+                           risk_informed_fraction: float = 0.4, seed: int = 42,
+                           sudden_fraction: float = 0.0,
+                           trend_strength_range=(1.0, 1.0)) -> pd.DataFrame:
     """
     Generate a synthetic longitudinal dataset.
 
@@ -99,6 +109,17 @@ def generate_trajectories(csv_path: str, n_patients: int = 300, n_visits: int = 
         whether a downstream classifier can recover the trend direction
         from the trajectory shape.
     seed : for reproducibility
+    sudden_fraction : fraction of patients given a "sudden" pattern: stable random
+        walk, then one large worsening jump at the LAST visit. 0 (default) keeps the
+        original three patterns (stable / worsening / improving) exactly as before.
+        When > 0, the remaining patients are split as before using
+        risk_informed_fraction.
+
+    trend_strength_range : (low, high) multiplier on the size of the worsening / improving
+        drift, drawn separately for each trending patient. (1, 1), the default, is the
+        original single fixed strength (about 2-3 mmHg of systolic BP per visit). A wider
+        range, e.g. (1, 4), simulates slow AND clinically meaningful steady trends, so a
+        classifier learns the SHAPE of a trend rather than one particular size.
 
     Returns
     -------
@@ -113,13 +134,21 @@ def generate_trajectories(csv_path: str, n_patients: int = 300, n_visits: int = 
 
     for pid in range(n_patients):
         anchor = anchor_sample.iloc[pid]
-        is_risk_informed = rng.random() < risk_informed_fraction
-        if is_risk_informed:
+        strength = 1.0
+        is_sudden = sudden_fraction > 0 and rng.random() < sudden_fraction
+        is_risk_informed = (not is_sudden) and rng.random() < risk_informed_fraction
+        if is_sudden:
+            trend_sign = 0
+            trend_label = "sudden"
+        elif is_risk_informed:
             trend_sign = rng.choice([-1, 1])  # -1 = improving, +1 = worsening
             trend_label = "worsening" if trend_sign == 1 else "improving"
+            lo, hi = trend_strength_range
+            strength = 1.0 if lo == hi == 1.0 else rng.uniform(lo, hi)
         else:
             trend_sign = 0
             trend_label = "stable"
+            strength = 1.0
 
         current = {col: float(anchor[col]) for col in FEATURES}
         for visit in range(1, n_visits + 1):
@@ -131,9 +160,11 @@ def generate_trajectories(csv_path: str, n_patients: int = 300, n_visits: int = 
                     # trend nudges the mean of the random step; noise still
                     # allows some visits to buck the overall trend, which is
                     # realistic (not every visit moves the same direction)
-                    trend_component = trend_sign * 0.4 * max_step
+                    trend_component = trend_sign * 0.4 * max_step * strength
                     noise_component = rng.normal(loc=0, scale=max_step * 0.5)
                     step = trend_component + noise_component
+                    if is_sudden and visit == n_visits and col in SUDDEN_JUMP_VITALS:
+                        step += rng.uniform(*SUDDEN_JUMP_STD_RANGE) * real_std[col]
                     current[col] = clip_to_plausible(current[col] + step, col)
 
             row = {"patient_id": pid, "visit_number": visit, "trend_label": trend_label}
@@ -223,27 +254,15 @@ def format_validation_report(report: dict) -> str:
 
 
 if __name__ == "__main__":
-    project_root = Path(__file__).resolve().parents[2]
-    candidate_paths = [
-        project_root / "data" / "maternal_health_risk.csv",
-        project_root / "data" / "raw" / "maternal_health_risk.csv",
-        project_root / "data" / "raw" / "anemia_dataset.csv",
-    ]
-    csv_path = next((p for p in candidate_paths if p.exists()), candidate_paths[0])
-    if not csv_path.exists():
-        raise FileNotFoundError(
-            "Could not find a maternal health dataset. Expected one of: "
-            + ", ".join(str(p) for p in candidate_paths)
-        )
-
-    synth = generate_trajectories(str(csv_path), n_patients=300, n_visits=4, seed=42)
+    csv_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "maternal_health_risk_data.csv")
+    synth = generate_trajectories(csv_path, n_patients=300, n_visits=4, seed=42)
     print(f"Generated {len(synth)} rows ({synth['patient_id'].nunique()} patients x up to 4 visits)")
     print(synth.head(8).to_string(index=False))
 
-    report = validate_synthetic_dataset(synth, str(csv_path))
+    report = validate_synthetic_dataset(synth, csv_path)
     print()
     print(format_validation_report(report))
 
-    out_path = project_root / "data" / "synthetic_trajectories_v2.csv"
+    out_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "synthetic_trajectories_v2.csv")
     synth.to_csv(out_path, index=False)
     print(f"\nSaved to {out_path}")

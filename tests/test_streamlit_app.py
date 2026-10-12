@@ -41,10 +41,11 @@ def test_high_risk_example():
     assert not at.exception, at.exception
     m = metrics(at)
     assert m["Predicted risk level"] == "High Risk"
-    assert m["Overall urgency"] == "4 / 4"          # severe BP flag (>=160/110)
-    banner = " ".join(e.value for e in at.error)
-    assert "Severe hypertension" in banner and "Pathway" in banner
-    print("[PASS] high-risk example: High Risk, urgency 4/4, banner names the severe-BP flag")
+    assert m["Overall urgency"] == "4 / 4"
+    assert m["Trajectory"] in ("Gradually Worsening", "Sudden Deterioration")
+    text = " ".join(x.value for x in at.markdown)
+    assert "Severe hypertension" in text           # 162/108 meets the ACOG severe threshold
+    print("[PASS] high-risk example: High Risk, rising trajectory, urgency 4/4, severe-BP flag listed")
 
 
 def test_low_risk_example():
@@ -92,6 +93,29 @@ def test_bad_bp_is_blocked():
     print("[PASS] systolic below diastolic is rejected")
 
 
+def _run_visits(prev, cur):
+    at = fresh()
+    at.session_state["n_prev"] = len(prev)
+    for i, v in enumerate(prev):
+        for suffix, x in zip(("sbp", "dbp", "bs", "temp", "hr"), v):
+            at.session_state[f"pv{i}_{suffix}"] = x
+    for k, x in zip(("sbp", "dbp", "bs", "temp", "hr"), cur):
+        at.session_state[k] = x
+    at.session_state["confirmed"] = True
+    at.run()
+    assert not at.exception, at.exception
+    return metrics(at)["Trajectory"]
+
+
+def test_trajectory_shapes():
+    assert _run_visits([(120, 80, 7.0, 98.0, 76)] * 3, (120, 80, 7.0, 98.0, 76)) == "Stable"
+    assert _run_visits([(112, 72, 7.0, 98.0, 72), (120, 78, 7.8, 98.2, 76), (128, 83, 8.6, 98.4, 80)],
+                       (137, 89, 9.5, 98.7, 85)) == "Gradually Worsening"
+    assert _run_visits([(150, 98, 11.0, 99.0, 90), (142, 93, 10.0, 98.8, 86), (134, 88, 9.0, 98.5, 82)],
+                       (126, 82, 8.0, 98.2, 78)) == "Improving"
+    print("[PASS] flat -> Stable, steady climb -> Gradually Worsening, steady fall -> Improving")
+
+
 if __name__ == "__main__":
     if not os.path.isdir(os.path.join(ROOT, "data")):
         print("[SKIP] no data/ folder")
@@ -101,5 +125,6 @@ if __name__ == "__main__":
     test_low_risk_example()
     test_sentence_fills_form()
     test_sudden_jump_detected()
+    test_trajectory_shapes()
     test_bad_bp_is_blocked()
     print("\nAll Streamlit app tests passed.")
