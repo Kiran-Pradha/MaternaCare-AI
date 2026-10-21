@@ -26,10 +26,13 @@ Pieces and where they come from
                         Falls back to a simple heuristic if that module is unavailable.
 """
 
+import html
 import json
 import os
+import re
 import sys
 import tempfile
+import time
 from datetime import datetime
 
 import numpy as np
@@ -39,7 +42,7 @@ from sklearn.ensemble import RandomForestClassifier
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(APP_DIR)
-for _p in (ROOT, os.path.join(ROOT, "src", "voice"), os.path.join(ROOT, "src", "data"),
+for _p in (ROOT, APP_DIR, os.path.join(ROOT, "src", "voice"), os.path.join(ROOT, "src", "data"),
            os.path.join(ROOT, "src", "models")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
@@ -57,6 +60,12 @@ try:                                    # trajectory classifier (trained on synt
     TRAJ_OK = True
 except Exception:
     TRAJ_OK = False
+
+try:                                    # printable PDF report (pip install reportlab)
+    from report import build_pdf  # noqa: E402
+    REPORT_OK = True
+except Exception:
+    REPORT_OK = False
 
 FEATURES = ["Age", "SystolicBP", "DiastolicBP", "BS", "BodyTemp", "HeartRate"]
 CLASS_ORDER = ["Low Risk", "Mid Risk", "High Risk"]
@@ -87,15 +96,6 @@ URGENCY_STYLE = {
     3: ("error", "Urgent: act within days"),
     4: ("error", "EMERGENCY: act now"),
 }
-
-EXAMPLES = {
-    "Lower-risk patient": dict(age=25, sbp=112, dbp=74, bs=7.2, temp=98.0, hr=70, use_hb=True, hb=12.0, n_prev=0),
-    "Mid-risk patient": dict(age=27, sbp=128, dbp=82, bs=9.0, temp=98.4, hr=76, use_hb=True, hb=10.5, n_prev=0),
-    "High-risk, rising readings": dict(
-        age=30, sbp=162, dbp=108, bs=14.5, temp=99.1, hr=92, use_hb=True, hb=8.5, n_prev=2,
-        pv0=(118, 76, 7.0, 98.0, 74), pv1=(135, 86, 9.5, 98.4, 82)),
-}
-
 
 # --------------------------------------------------------------------------
 # Model, explanations, trajectory
@@ -288,70 +288,91 @@ def _set_field(key, value):
     st.session_state[key] = int(round(value)) if is_int else float(value)
 
 
-def cb_speak(field):
-    """Record 6 s from this computer's microphone and fill the matching box(es)."""
-    from stt_vosk_integration import transcribe_microphone, NUMBER_VOCABULARY
+VOICE_PROMPTS = {   # field -> (name, what the computer says)
+    "Age": ("age", "Please say the age in years."),
+    "BP": ("blood pressure", "Please say the blood pressure. First the top number, then the bottom number."),
+    "BS": ("blood sugar", "Please say the blood sugar."),
+    "BodyTemp": ("temperature", "Please say the body temperature in Fahrenheit."),
+    "HeartRate": ("heart rate", "Please say the heart rate."),
+    "Hemoglobin": ("hemoglobin", "Please say the hemoglobin."),
+}
+FIELD_TO_KEY = {"Age": "age", "BS": "bs", "BodyTemp": "temp", "HeartRate": "hr", "Hemoglobin": "hb"}
+
+
+def cb_start_voice(job):
+    """Button callback: only REMEMBER what was asked. The work happens at the top of the next
+    run (run_voice_job), before the input boxes exist, so it is allowed to fill them."""
+    st.session_state["voice_job"] = job
+
+
+def say(text):
+    """Speak through this computer's speakers (offline), if spoken prompts are switched on."""
+    if not st.session_state.get("spoken_prompts", True):
+        return
     try:
-        transcript = transcribe_microphone(duration_seconds=6, vocabulary=NUMBER_VOCABULARY)
-    except Exception as e:
-        st.session_state["voice_msg"] = ("error", f"Microphone problem: {e}")
+        from tts_offline import speak_offline
+        speak_offline(text)
+        time.sleep(0.3)          # let the sound die away so the microphone doesn't hear it
+    except Exception:
+        pass
+
+
+def _capture(field, tries=2):
+    """Say what is needed, listen for 6 seconds, parse. -> (value, transcript, error_text)."""
+    from stt_vosk_integration import transcribe_microphone, NUMBER_VOCABULARY
+    name, prompt = VOICE_PROMPTS[field]
+    transcript, error = "", ""
+    for attempt in range(tries):
+        st.toast(prompt.replace("Please say", "Say"), icon="\U0001F3A4")   # visible even if scrolled down
+        say(prompt if attempt == 0 else f"Sorry, I did not catch that. {prompt}")
+        try:
+            transcript = transcribe_microphone(duration_seconds=6, vocabulary=NUMBER_VOCABULARY)
+        except Exception as e:
+            return None, "", f"Microphone problem: {e}"
+        value, err = parse_field_value(transcript, field)
+        if not err:
+            return value, transcript, ""
+        error = f"Heard \u201c{transcript}\u201d. {err}"
+    return None, transcript, error
+
+
+def run_voice_job(job):
+    """job = one field ("Age", "BP", "BS", "BodyTemp", "HeartRate", "Hemoglobin") or "ALL"."""
+    ready, reason = mic_status()
+    if not ready:
+        st.session_state["voice_msg"] = ("error", f"Microphone entry is not set up: {reason}.")
         return
-    value, err = parse_field_value(transcript, field)
-    if err:
-        st.session_state["voice_msg"] = ("error", f"Heard \u201c{transcript}\u201d. {err} Please try again.")
-        return
-    if field == "BP":
-        _set_field("sbp", value[0])
-        _set_field("dbp", value[1])
-        shown = f"{value[0]:g}/{value[1]:g}"
+    if job == "ALL":
+        fields = ["Age", "BP", "BS", "BodyTemp", "HeartRate"] + (["Hemoglobin"] if st.session_state.get("ask_hb") else [])
     else:
-        key = {"Age": "age", "BS": "bs", "BodyTemp": "temp", "HeartRate": "hr", "Hemoglobin": "hb"}[field]
-        _set_field(key, value)
-        if key == "hb":
-            st.session_state["use_hb"] = True
-        shown = f"{value:g}"
-    st.session_state["voice_msg"] = (
-        "success", f"Heard \u201c{transcript}\u201d \u2192 {shown}. Please check the box below.")
-    st.session_state["confirmed"] = False
-
-
-def cb_fill_sentence():
-    parsed = parse_vitals_from_text(st.session_state.get("sentence", ""))
-    filled, skipped = [], []
-    for name in parsed.fields_found():
-        key = PARSER_TO_KEY[name]
-        val = getattr(parsed, name)
-        _, lo, hi, _, _ = FIELDS[key]
-        if lo <= val <= hi:
-            _set_field(key, val)
-            if key == "hb":
-                st.session_state["use_hb"] = True
-            filled.append(name)
+        fields = [job]
+    done, failed = [], []
+    for field in fields:
+        name = VOICE_PROMPTS[field][0]
+        value, transcript, err = _capture(field)
+        if err:
+            failed.append(f"{name} ({err})")
+            say(f"Sorry, I could not understand the {name}.")
+            continue
+        if field == "BP":
+            _set_field("sbp", value[0])
+            _set_field("dbp", value[1])
+            shown = f"{value[0]:g} over {value[1]:g}"
         else:
-            skipped.append(f"{name}={val:g}")
-    if filled or skipped:
-        msg = "Filled: " + (", ".join(filled) if filled else "nothing") + "."
-        if skipped:
-            msg += " Ignored out-of-range: " + ", ".join(skipped) + "."
-        st.session_state["voice_msg"] = ("success" if filled else "error", msg + " Please check the boxes below.")
-        st.session_state["confirmed"] = False
-    else:
-        st.session_state["voice_msg"] = ("error", "No vitals found in that sentence.")
-
-
-def cb_example(name):
-    ex = EXAMPLES[name]
-    for k in ("age", "sbp", "dbp", "bs", "temp", "hr", "hb"):
-        if k in ex:
-            st.session_state[k] = ex[k]
-    st.session_state["use_hb"] = ex["use_hb"]
-    st.session_state["n_prev"] = ex["n_prev"]
-    for i in range(3):
-        if f"pv{i}" in ex:
-            for suffix, v in zip(("sbp", "dbp", "bs", "temp", "hr"), ex[f"pv{i}"]):
-                st.session_state[f"pv{i}_{suffix}"] = v
+            _set_field(FIELD_TO_KEY[field], value)
+            if field == "Hemoglobin":
+                st.session_state["use_hb"] = True
+            shown = f"{value:g}"
+        done.append(f"{name} {shown}")
+        say(f"I heard {shown}.")
     st.session_state["confirmed"] = False
-    st.session_state["voice_msg"] = ("info", f"Loaded example: {name}. Check the values, then tick the box.")
+    if done:
+        say("Please check the values on the screen, then tick the confirmation box.")
+    text = ("Filled: " + ", ".join(done) + "." if done else "Nothing was filled.")
+    if failed:
+        text += " Not understood: " + "; ".join(failed) + ". You can type those values instead."
+    text += " Please check the boxes below."
+    st.session_state["voice_msg"] = ("success" if done and not failed else "warning" if done else "error", text)
 
 
 def speak_text(text):
@@ -367,13 +388,186 @@ def speak_text(text):
 
 
 # --------------------------------------------------------------------------
+# Assessment helpers (HTML snippets; every dynamic value is escaped)
+# --------------------------------------------------------------------------
+UR_PALETTE = {   # urgency -> (light tint, strong colour)
+    0: ("#EAF6EF", "#1F7A4D"),
+    1: ("#EAF6EF", "#1F7A4D"),
+    2: ("#FFF5DF", "#B36B00"),
+    3: ("#FDEBDD", "#C2410C"),
+    4: ("#FDE8E6", "#B42318"),
+}
+RISK_COLOR = {"Low Risk": "#1F7A4D", "Mid Risk": "#B36B00", "High Risk": "#B42318"}
+TRAJ_COLOR = {"Stable": "#2F5D9B", "Gradually Worsening": "#B36B00",
+              "Sudden Deterioration": "#B42318", "Improving": "#1F7A4D"}
+ANEMIA_COLOR = {"Low Risk": "#1F7A4D", "Moderate Risk": "#B36B00", "Severe Risk": "#B42318"}
+
+
+def _e(text):
+    """Escape text for HTML, keep **bold** and line breaks."""
+    t = html.escape(str(text))
+    t = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t)
+    return t.replace("\n", "<br>")
+
+
+def _banner(headline, urg, lines_html):
+    bg, col = UR_PALETTE[urg]
+    segs = "".join(f'<span class="mc-seg{" on" if i < urg else ""}"></span>' for i in range(4))
+    return (f'<div class="mc-hbanner" style="border-color:{col};">'
+            f'<div class="mc-hbanner-top" style="background:{col};"><span class="mc-hbanner-title">{_e(headline)}</span>'
+            f'<span class="mc-hbanner-level"><span class="mc-seg-label">Urgency {urg} of 4</span>{segs}</span></div>'
+            f'<div class="mc-hbanner-body" style="background:{bg};">{lines_html}</div></div>')
+
+
+def _strip(cells):
+    """cells = [(label, value, sub, colour)] -> three result cards."""
+    return '<div class="mc-strip">' + "".join(
+        f'<div class="mc-cell" style="border-top-color:{c};background:{c}12;">'
+        f'<div class="mc-cell-label">{_e(l)}</div><div class="mc-cell-value" style="color:{c};">{_e(v)}</div>'
+        f'<div class="mc-cell-sub">{_e(sub)}</div></div>'
+        for l, v, sub, c in cells) + "</div>"
+
+
+def _panel(title, body, meta=None, meta_color=None):
+    m = ""
+    if meta:
+        st_ = (f' style="color:{meta_color};border-color:{meta_color}66;background:{meta_color}12;"'
+               if meta_color else "")
+        m = f'<span class="mc-meta"{st_}>{_e(meta)}</span>'
+    return (f'<div class="mc-panel"><div class="mc-panel-head"><span class="mc-panel-title">{_e(title)}</span>{m}</div>'
+            f'<div class="mc-panel-body">{body}</div></div>')
+
+
+def _bar_rows(items):
+    """items = [(label, fraction 0-1, colour, is_predicted)]"""
+    rows = []
+    for label, frac, color, pred in items:
+        frac = min(max(frac, 0.0), 1.0)
+        bg = f"background:{color}14;" if pred else ""
+        lab = f"<b>{_e(label)}</b>" if pred else _e(label)
+        rows.append(f'<div class="mc-bar-row" style="{bg}"><div class="mc-bar-top"><span>{lab}</span>'
+                    f'<span class="mc-bar-pct" style="color:{color};">{frac:.0%}</span></div>'
+                    f'<div class="mc-track"><div class="mc-fill" style="width:{frac * 100:.0f}%;background:{color};"></div></div></div>')
+    return "".join(rows)
+
+
+# --------------------------------------------------------------------------
 # Page
 # --------------------------------------------------------------------------
-st.set_page_config(page_title="MaternaCare AI", page_icon="\U0001F930", layout="wide")
+st.set_page_config(page_title="MaternaCare AI", page_icon="\U0001F338", layout="wide",
+                   initial_sidebar_state="collapsed")
+
+# Soft "maternal" look: blush pink, plum text, lavender touches. The base colours come from
+# .streamlit/config.toml (read when Streamlit STARTS); this CSS adds the finishing touches.
+THEME_TOML = """[theme]
+base = "light"
+primaryColor = "#C2185B"
+backgroundColor = "#FFF8FB"
+secondaryBackgroundColor = "#FDE7EF"
+textColor = "#4A2545"
+font = "sans serif"
+"""
+THEME_CSS = """
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
+.stApp { background: linear-gradient(180deg, #FFF8FB 0%, #FFEEF4 100%); }
+h1, h2, h3, h4, h5 { color: #7A2E5C !important; }
+.mc-hero { background: linear-gradient(120deg, #F8BBD0 0%, #E8D5F2 100%); border: 1px solid #F3C6D6;
+           border-radius: 22px; padding: 22px 30px; margin: 0 0 14px 0;
+           box-shadow: 0 4px 14px rgba(194, 24, 91, 0.10); }
+.mc-hero-title { font-size: 2.2rem; font-weight: 700; color: #6A1B4D; line-height: 1.2; }
+.mc-hero-sub { font-size: 1.05rem; color: #7A2E5C; margin-top: 6px; }
+button { border-radius: 22px !important; }
+[data-testid="stMetric"] { background: #FFFFFF; border: 1px solid #F3C6D6; border-radius: 16px;
+                           padding: 12px 18px; box-shadow: 0 2px 8px rgba(194, 24, 91, 0.08); }
+[data-testid="stExpander"] { background: #FFFFFF; border: 1px solid #F3C6D6 !important; border-radius: 16px; }
+section[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"],
+[data-testid="collapsedControl"] { display: none !important; }
+
+/* ---- assessment ---- */
+.stApp h2 { font-family: 'Fraunces', Georgia, 'Times New Roman', serif !important; font-weight: 700 !important; }
+.mc-hbanner, .mc-cell, .mc-panel { font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+.mc-hbanner { border: 1px solid; border-radius: 14px; overflow: hidden; margin: 0 0 16px 0; box-shadow: 0 3px 12px rgba(74, 29, 63, 0.10); }
+.mc-hbanner-top { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 18px;
+                  padding: 14px 22px; color: #FFFFFF; }
+.mc-hbanner-title { font-family: 'Fraunces', Georgia, serif; font-size: 1.45rem; font-weight: 700; letter-spacing: 0.1px; }
+.mc-hbanner-level { font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; white-space: nowrap; }
+.mc-seg { display: inline-block; width: 24px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.35); margin-left: 5px; }
+.mc-seg.on { background: #FFFFFF; }
+.mc-seg-label { margin-right: 6px; }
+.mc-hbanner-body { padding: 14px 22px 16px 22px; color: #2E1A2B; line-height: 1.6; font-size: 0.98rem; }
+.mc-hbanner-body div + div { margin-top: 4px; }
+.mc-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin: 0 0 16px 0; }
+.mc-cell { border: 1px solid #E8C9D8; border-top-width: 4px; border-radius: 12px; padding: 14px 18px 16px 18px;
+           box-shadow: 0 2px 8px rgba(74, 29, 63, 0.07); }
+.mc-cell-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #7A4A6A; }
+.mc-cell-value { font-family: 'Fraunces', Georgia, serif; font-size: 1.75rem; font-weight: 700; line-height: 1.2; margin-top: 6px; }
+.mc-cell-sub { font-size: 0.85rem; color: #6B5568; margin-top: 4px; }
+.mc-panel { background: #FFFFFF; border: 1px solid #E8C9D8; border-radius: 14px; margin: 0 0 16px 0; overflow: hidden;
+            box-shadow: 0 2px 10px rgba(74, 29, 63, 0.07); }
+.mc-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 18px;
+                 background: linear-gradient(90deg, #FBE9F1 0%, #F4EAFB 100%); border-bottom: 1px solid #E8C9D8;
+                 border-left: 5px solid #B02A6F; }
+.mc-panel-title { font-family: 'Fraunces', Georgia, serif; font-size: 1.1rem; font-weight: 700; color: #4A1D3F; }
+.mc-meta { background: #FFFFFF; border: 1px solid #E0BFD1; border-radius: 999px; padding: 2px 12px; font-size: 0.78rem;
+           font-weight: 600; color: #6B2A55; white-space: nowrap; }
+.mc-panel-body { padding: 16px 18px; color: #2E1A2B; font-size: 0.97rem; line-height: 1.6; }
+.mc-action { font-family: 'Fraunces', Georgia, serif; font-size: 1.3rem; font-weight: 700; color: #4A1D3F; line-height: 1.35; }
+.mc-when { display: inline-flex; align-items: center; gap: 10px; background: #FBEFF5; border: 1px solid #F0D3E1;
+           border-radius: 8px; padding: 6px 12px; margin-top: 12px; font-weight: 500; }
+.mc-when-label { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #9A2D66; }
+.mc-note { font-size: 0.84rem; color: #6B5568; margin-top: 12px; line-height: 1.5; }
+.mc-flag { border-left: 4px solid; border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; }
+.mc-flag:last-child { margin-bottom: 0; }
+.mc-flag-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.mc-flag-title { font-weight: 700; }
+.mc-flag-level { font-size: 0.78rem; font-weight: 700; white-space: nowrap; }
+.mc-flag-basis { font-size: 0.82rem; color: #6B5568; margin-top: 4px; }
+.mc-bar-row { border-radius: 10px; padding: 8px 12px; margin-bottom: 6px; }
+.mc-bar-row:last-child { margin-bottom: 0; }
+.mc-bar-top { display: flex; justify-content: space-between; font-size: 0.95rem; margin-bottom: 6px; }
+.mc-bar-pct { font-family: 'Fraunces', Georgia, serif; font-weight: 700; font-size: 1.05rem; }
+.mc-track { background: #F3E3EC; border-radius: 6px; height: 10px; overflow: hidden; }
+.mc-fill { height: 100%; border-radius: 6px; }
+.mc-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+.mc-table th { text-align: left; font-weight: 700; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase;
+               color: #7A4A6A; padding: 0 10px 8px 0; border-bottom: 2px solid #F0D3E1; }
+.mc-table td { padding: 10px 10px 10px 0; border-bottom: 1px solid #F6E8EF; color: #2E1A2B; vertical-align: middle; }
+.mc-table tr:last-child td { border-bottom: none; }
+.mc-shap-cell { display: flex; align-items: center; gap: 10px; }
+.mc-shap-track { flex: 1; background: #F6ECF2; border-radius: 5px; height: 8px; overflow: hidden; min-width: 60px; }
+.mc-shap-fill { height: 100%; border-radius: 5px; }
+.mc-shap-num { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 44px; text-align: right; }
+.mc-summary { font-size: 1.02rem; line-height: 1.7; }
+"""
+st.markdown(f"<style>{THEME_CSS}</style>", unsafe_allow_html=True)
+
+
+def ensure_theme_file():
+    """Streamlit takes its colours from .streamlit/config.toml in the folder it was started from.
+    If the light theme is not active, create that file (never overwriting an existing one).
+    Returns None (all fine), "created", "exists" or "failed"."""
+    try:
+        if st.get_option("theme.base") == "light":
+            return None
+    except Exception:
+        pass
+    path = os.path.join(os.getcwd(), ".streamlit", "config.toml")
+    if os.path.exists(path):
+        return "exists"
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(THEME_TOML)
+        return "created"
+    except Exception:
+        return "failed"
+
+
+_theme_state = ensure_theme_file()
 
 # default values (set once; widgets keep their own state afterwards)
 _defaults = dict(age=28, sbp=120, dbp=80, bs=7.0, temp=98.0, hr=76, use_hb=False, hb=11.5,
-                 n_prev=0, confirmed=False, sentence="age 32, blood pressure 140 over 90, "
+                 n_prev=0, confirmed=False, spoken_prompts=True, ask_hb=False, patient_label="", health_worker="", sentence="age 32, blood pressure 140 over 90, "
                  "blood sugar 7.5, temperature 98.6, heart rate 88")
 for k, v in _defaults.items():
     st.session_state.setdefault(k, v)
@@ -381,22 +575,11 @@ for i in range(3):
     for suffix, v in zip(("sbp", "dbp", "bs", "temp", "hr"), (118, 76, 7.0, 98.0, 74)):
         st.session_state.setdefault(f"pv{i}_{suffix}", v)
 
-csv_path, _checked = find_dataset()
+_job = st.session_state.pop("voice_job", None)
+if _job:
+    run_voice_job(_job)          # must run BEFORE the input boxes are drawn so it can fill them
 
-with st.sidebar:
-    st.header("MaternaCare AI")
-    st.caption("Hybrid, explainable, longitudinal decision support for maternal health risk in "
-               "low-resource settings.")
-    st.markdown(
-        "**How an assessment is made**\n\n"
-        "1. A machine-learning model estimates the risk level from the vitals.\n"
-        "2. The pattern across visits (stable, worsening, ...) is determined.\n"
-        "3. A rule-based engine (WHO / NICE / ACOG thresholds) turns risk + pattern + "
-        "vital-sign flags into a concrete action.\n"
-        "4. SHAP shows which vitals drove the ML estimate."
-    )
-    st.warning("Prototype for a capstone project. It supports, and never replaces, "
-               "clinical judgement. Not a medical device.")
+csv_path, _checked = find_dataset()
 
 if csv_path is None:
     st.title("\U0001F930 MaternaCare AI")
@@ -428,43 +611,31 @@ if csv_path is None:
 clf, n_train = load_model(csv_path)
 traj_clf, traj_eval = load_trajectory_model(csv_path)
 explainer = load_explainer(clf)
-with st.sidebar:
-    st.caption(f"Risk model: Random Forest trained on {n_train} records "
-               f"(about 84% cross-validated accuracy in our experiments).")
-    if traj_clf is not None:
-        st.caption(f"Trajectory model: Random Forest trained on {traj_clf.n_train} simulated "
-                   f"multi-visit patients ({traj_eval['accuracy']:.0%} on fresh simulated patients).")
-    else:
-        st.caption("Trajectory model unavailable: using the simple fallback heuristic.")
 
-st.title("\U0001F930 MaternaCare AI")
-st.caption("Enter the patient's vitals, confirm them, and get a risk assessment with a recommended action.")
+st.markdown(
+    '<div class="mc-hero"><div class="mc-hero-title">\U0001F338 MaternaCare AI</div></div>',
+    unsafe_allow_html=True)
 
 # ---- 1. vitals ------------------------------------------------------------
 st.subheader("1. Patient vitals")
 
-ex_cols = st.columns(len(EXAMPLES) + 1)
-ex_cols[0].markdown("**Try an example:**")
-for col, name in zip(ex_cols[1:], EXAMPLES):
-    col.button(name, key=f"ex_{name}", on_click=cb_example, args=(name,))
-
 with st.expander("\U0001F3A4 Voice entry (optional)", expanded=False):
     ready, reason = mic_status()
     if ready:
-        st.caption("Click a button, wait a second, then say just the number (for blood pressure: "
-                   "the top number, then the bottom number). Recording lasts 6 seconds and uses "
-                   "the microphone of the computer running this app.")
-        bcols = st.columns(5)
+        st.checkbox("\U0001F50A Speak the questions aloud", key="spoken_prompts")
+        g1, g2 = st.columns([2, 1])
+        g1.button("\U0001F399\uFE0F Ask me every question (hands-free)", key="spk_ALL", on_click=cb_start_voice,
+                  args=("ALL",), type="primary")
+        g2.checkbox("Also ask for hemoglobin", key="ask_hb")
+        st.markdown("Or fill one value at a time:")
+        bcols = st.columns(6)
         for col, (label, field) in zip(bcols, [("Age", "Age"), ("Blood pressure", "BP"),
                                                ("Blood sugar", "BS"), ("Temperature", "BodyTemp"),
-                                               ("Heart rate", "HeartRate")]):
-            col.button(f"Speak {label.lower()}", key=f"spk_{field}", on_click=cb_speak, args=(field,))
+                                               ("Heart rate", "HeartRate"), ("Hemoglobin", "Hemoglobin")]):
+            col.button(f"Speak {label.lower()}", key=f"spk_{field}", on_click=cb_start_voice, args=(field,))
     else:
         st.info(f"Microphone entry is not set up on this computer: {reason}. "
                 "You can still type values or use the sentence box below.")
-    if PARSER_OK:
-        st.text_input("Or type / paste a whole sentence", key="sentence")
-        st.button("Fill the form from this sentence", key="fill_sentence", on_click=cb_fill_sentence)
     msg = st.session_state.get("voice_msg")
     if msg:
         getattr(st, msg[0])(msg[1])
@@ -487,8 +658,6 @@ with c3:
 
 # ---- 2. previous visits / trajectory ---------------------------------------
 st.subheader("2. Previous visits (optional)")
-st.caption("If you add previous visits, replace the boxes' starting numbers with the patient's REAL "
-           "earlier readings. The trajectory, and so the urgency, is calculated from them.")
 t1, t2 = st.columns([1, 2])
 with t1:
     st.selectbox("Number of previous visits", [0, 1, 2, 3], key="n_prev")
@@ -558,25 +727,31 @@ rec = generate_recommendation(
 st.divider()
 st.header("Assessment")
 
-box, headline = URGENCY_STYLE[rec["overall_urgency"]]
 prim = rec["primary_recommendation"]
+urg = rec["overall_urgency"]
+_, headline = URGENCY_STYLE[urg]
+ur_bg, ur_col = UR_PALETTE[urg]
+
 # The engine's overall urgency is the MAX of the risk x trajectory row and any vital-sign
 # flag. When a flag is what raised it, say so, instead of showing a headline that
 # contradicts the timeframe of the table row underneath it.
-driving = ([f for f in rec["vital_flags"] if f["urgency"] == rec["overall_urgency"]]
-           if rec["overall_urgency"] > prim["urgency"] else [])
+driving = ([f for f in rec["vital_flags"] if f["urgency"] == urg] if urg > prim["urgency"] else [])
 if driving:
-    reasons = " ".join(f"**{f['flag']}:** {f['detail']}" for f in driving)
-    getattr(st, box)(f"**{headline}.** {reasons}  \n"
-                     f"**Basis:** {driving[0]['basis']}  \n"
-                     f"**Pathway from risk level \u00d7 trajectory:** {prim['action']} ({prim['timeframe']}).")
+    _lines = "".join(f'<div><b>{_e(f["flag"])}:</b> {_e(f["detail"])}</div>' for f in driving)
+    _lines += f'<div><b>Basis:</b> {_e(driving[0]["basis"])}</div>'
+    _lines += (f'<div><b>Pathway from risk level \u00d7 trajectory:</b> {_e(prim["action"])} '
+               f'({_e(prim["timeframe"])})</div>')
 else:
-    getattr(st, box)(f"**{headline}.** {prim['action']}  \n**When:** {prim['timeframe']}")
+    _lines = f'<div>{_e(prim["action"])}</div><div><b>When:</b> {_e(prim["timeframe"])}</div>'
+st.markdown(_banner(headline, urg, _lines), unsafe_allow_html=True)
 
-m1, m2, m3 = st.columns(3)
-m1.metric("Predicted risk level", risk_level)
-m2.metric("Trajectory", rec["trajectory_pattern"])
-m3.metric("Overall urgency", f"{rec['overall_urgency']} / 4")
+_how_txt = how[:1].upper() + how[1:]
+st.markdown(_strip([
+    ("Predicted risk level", risk_level, f"Model probability {probs[risk_level]:.0%}",
+     RISK_COLOR.get(risk_level, "#4A1D3F")),
+    ("Trajectory", rec["trajectory_pattern"], _how_txt, TRAJ_COLOR.get(rec["trajectory_pattern"], "#4A1D3F")),
+    ("Overall urgency", f"{urg} of 4", headline, ur_col),
+]), unsafe_allow_html=True)
 
 if traj_probs or scores:
     _conf = ""
@@ -588,40 +763,62 @@ if traj_probs or scores:
                "and urgency are not valid. Open \u201cHow the trajectory was decided\u201d below to check.")
 
 left, right = st.columns(2)
+
 with left:
-    st.markdown("#### Recommended action")
-    st.markdown(f"**{prim['action']}**  \n{prim['timeframe']}")
-    st.caption(f"Basis: {prim['basis']}")
+    st.markdown(_panel(
+        "Recommended action",
+        f'<div class="mc-action">{_e(prim["action"])}</div>'
+        f'<div class="mc-when"><span class="mc-when-label">When</span><span>{_e(prim["timeframe"])}</span></div>'
+        f'<div class="mc-note">Basis: {_e(prim["basis"])}</div>',
+        meta=f"Urgency {prim['urgency']} of 4", meta_color=UR_PALETTE[prim["urgency"]][1]),
+        unsafe_allow_html=True)
 
     if rec["vital_flags"]:
-        st.markdown("#### Vital-sign flags")
-        for f in rec["vital_flags"]:
-            st.markdown(f"- **{f['flag']}**: {f['detail']}")
-            st.caption(f"Basis: {f['basis']}")
+        _body = "".join(
+            f'<div class="mc-flag" style="border-left-color:{UR_PALETTE[f["urgency"]][1]};'
+            f'background:{UR_PALETTE[f["urgency"]][0]};">'
+            f'<div class="mc-flag-top"><span class="mc-flag-title">{_e(f["flag"])}</span>'
+            f'<span class="mc-flag-level" style="color:{UR_PALETTE[f["urgency"]][1]};">Urgency {f["urgency"]} of 4</span></div>'
+            f'<div>{_e(f["detail"])}</div><div class="mc-flag-basis">Basis: {_e(f["basis"])}</div></div>'
+            for f in rec["vital_flags"])
+        _meta, _mcol = f"{len(rec['vital_flags'])} flagged", "#B42318"
     else:
-        st.markdown("#### Vital-sign flags")
-        st.write("None: all vitals are below the rule thresholds.")
+        _body = "None. All vitals are below the rule thresholds."
+        _meta, _mcol = "No flags", "#1F7A4D"
+    st.markdown(_panel("Vital-sign flags", _body, meta=_meta, meta_color=_mcol), unsafe_allow_html=True)
 
     if "anemia_recommendation" in rec:
         a = rec["anemia_recommendation"]
-        st.markdown(f"#### Anemia check ({a['tier']})")
-        st.write(a["action"])
-        st.caption(f"Basis: {a['basis']}")
+        st.markdown(_panel(
+            "Anemia check",
+            f'<div>{_e(a["action"])}</div><div class="mc-note">Basis: {_e(a["basis"])}</div>',
+            meta=a["tier"], meta_color=ANEMIA_COLOR.get(a["tier"], "#6B2A55")), unsafe_allow_html=True)
 
 with right:
-    st.markdown("#### How confident is the model?")
-    for _c in CLASS_ORDER:
-        st.write(f"{_c}: **{probs[_c]:.0%}**")
-        st.progress(min(max(probs[_c], 0.0), 1.0))
+    _bars = _bar_rows([(c, probs[c], RISK_COLOR[c], c == risk_level) for c in CLASS_ORDER])
+    st.markdown(_panel("Model confidence", _bars, meta=f"Predicted: {risk_level}",
+                       meta_color=RISK_COLOR[risk_level]), unsafe_allow_html=True)
 
-    st.markdown("#### Why this risk level? (SHAP)")
     if top:
+        _max = max(abs(sv) for _, sv, _ in top) or 1.0
+        _trs = ""
         for feat, sv, val in top:
-            direction = "raised" if sv > 0 else "lowered"
-            st.markdown(f"- **{feat} = {val:g}** {direction} the chance of *{risk_level}* ({sv:+.2f})")
-        st.caption("SHAP shows how much each vital pushed the model towards this risk level.")
+            up = sv > 0
+            _col = "#B02A6F" if up else "#2F5D9B"
+            _trs += (f'<tr><td><b>{_e(feat)}</b></td><td>{val:g}</td>'
+                     f'<td style="color:{_col};font-weight:700;">{"Raises" if up else "Lowers"}</td>'
+                     f'<td><div class="mc-shap-cell"><div class="mc-shap-track"><div class="mc-shap-fill" '
+                     f'style="width:{abs(sv) / _max * 100:.0f}%;background:{_col};"></div></div>'
+                     f'<span class="mc-shap-num">{sv:+.2f}</span></div></td></tr>')
+        _body = ('<table class="mc-table"><tr><th>Vital</th><th>Value</th>'
+                 f'<th>Effect on {_e(risk_level)}</th><th>Contribution</th></tr>{_trs}</table>'
+                 '<div class="mc-note">SHAP shows how much each vital pushed the model towards this risk level.</div>')
     else:
-        st.caption("SHAP explanations are not available (the shap package is not installed).")
+        _body = '<div class="mc-note">SHAP explanations are not available (the shap package is not installed).</div>'
+    st.markdown(_panel("Why this risk level", _body, meta="SHAP"), unsafe_allow_html=True)
+
+st.markdown(_panel("Summary for the health worker", f'<div class="mc-summary">{_e(rec["explanation"])}</div>'),
+            unsafe_allow_html=True)
 
 with st.expander(f"How the trajectory was decided ({how})"):
     if traj_probs:
@@ -654,12 +851,41 @@ with st.expander(f"How the trajectory was decided ({how})"):
     else:
         st.write(f"Pattern: **{pattern}**, {how}.")
 
-st.markdown("#### Summary for the health worker")
-st.write(rec["explanation"])
+# ---- printable report, read aloud, download -----------------------------------
+st.markdown("#### Printable report")
+p1, p2 = st.columns(2)
+p1.text_input("Patient name or ID (printed on the report only, never stored)", key="patient_label")
+p2.text_input("Health worker", key="health_worker")
 
-# ---- read aloud + download --------------------------------------------------
-a1, a2 = st.columns(2)
-with a1:
+stamp = datetime.now()
+report_data = {
+    "generated_at": stamp.strftime("%d %b %Y, %H:%M"),
+    "patient_label": st.session_state["patient_label"],
+    "health_worker": st.session_state["health_worker"],
+    "vitals": current,
+    "hemoglobin": hb,
+    "previous_visits": prev_visits,
+    "risk_level": risk_level,
+    "model_probabilities": probs,
+    "trajectory": {"pattern": pattern, "how": how,
+                   "confidence": traj_probs[pattern] if traj_probs else None, "probabilities": traj_probs},
+    "urgency": {"level": rec["overall_urgency"], "headline": headline},
+    "recommendation": rec,
+    "shap": top,
+}
+
+b1, b2, b3 = st.columns(3)
+with b1:
+    if REPORT_OK:
+        try:
+            st.download_button("\U0001F5A8\uFE0F Download printable report (PDF)", build_pdf(report_data),
+                               file_name=f"maternacare_report_{stamp:%Y%m%d_%H%M}.pdf", mime="application/pdf",
+                               key="dl_pdf", type="primary")
+        except Exception as e:
+            st.error(f"Could not build the PDF report: {e}")
+    else:
+        st.info("To enable the printable PDF report, run:  pip install reportlab  (then restart the app).")
+with b2:
     if st.button("\U0001F50A Read the recommendation aloud", key="read_aloud"):
         spoken = (f"Risk level {risk_level}. Trajectory {rec['trajectory_pattern']}. "
                   f"Recommended action: {prim['action']}. When: {prim['timeframe']}.")
@@ -670,15 +896,9 @@ with a1:
             st.audio(wav, format="audio/wav", autoplay=True)
         else:
             st.warning("Offline text-to-speech is not available on this computer.")
-with a2:
-    report = {
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "vitals": current,
-        "hemoglobin": hb,
-        "previous_visits": prev_visits,
-        "model_probabilities": probs,
-        "trajectory_how": how,
-        "recommendation": rec,
-    }
-    st.download_button("\u2B07\uFE0F Download assessment (JSON)", json.dumps(report, indent=2, default=str),
-                       file_name="maternacare_assessment.json", mime="application/json")
+with b3:
+    st.download_button("\u2B07\uFE0F Download data (JSON)",
+                       json.dumps({k: v for k, v in report_data.items() if k not in ("patient_label", "health_worker")},
+                                  indent=2, default=str),
+                       file_name="maternacare_assessment.json", mime="application/json", key="dl_json")
+st.caption("Open the downloaded PDF and print it, or save it to the patient's file.")
