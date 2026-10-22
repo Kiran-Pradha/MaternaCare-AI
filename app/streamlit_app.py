@@ -27,7 +27,6 @@ Pieces and where they come from
 """
 
 import html
-import json
 import os
 import re
 import sys
@@ -454,87 +453,86 @@ def _bar_rows(items):
 # --------------------------------------------------------------------------
 # Page
 # --------------------------------------------------------------------------
-st.set_page_config(page_title="MaternaCare AI", page_icon="\U0001F338", layout="wide",
+st.set_page_config(page_title="MaternaCare AI", page_icon="\U0001FA7A", layout="wide",
                    initial_sidebar_state="collapsed")
 
-# Soft "maternal" look: blush pink, plum text, lavender touches. The base colours come from
-# .streamlit/config.toml (read when Streamlit STARTS); this CSS adds the finishing touches.
+# Clinical teal-and-blue look. The base colours come from .streamlit/config.toml (read when
+# Streamlit STARTS); this CSS adds the finishing touches. All text uses the same font as the
+# rest of the page, so the assessment looks like the other sections.
 THEME_TOML = """[theme]
 base = "light"
-primaryColor = "#C2185B"
-backgroundColor = "#FFF8FB"
-secondaryBackgroundColor = "#FDE7EF"
-textColor = "#4A2545"
+primaryColor = "#0F766E"
+backgroundColor = "#F5FAFA"
+secondaryBackgroundColor = "#E3F2F1"
+textColor = "#12343B"
 font = "sans serif"
 """
 THEME_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
-.stApp { background: linear-gradient(180deg, #FFF8FB 0%, #FFEEF4 100%); }
-h1, h2, h3, h4, h5 { color: #7A2E5C !important; }
-.mc-hero { background: linear-gradient(120deg, #F8BBD0 0%, #E8D5F2 100%); border: 1px solid #F3C6D6;
-           border-radius: 22px; padding: 22px 30px; margin: 0 0 14px 0;
-           box-shadow: 0 4px 14px rgba(194, 24, 91, 0.10); }
-.mc-hero-title { font-size: 2.2rem; font-weight: 700; color: #6A1B4D; line-height: 1.2; }
-.mc-hero-sub { font-size: 1.05rem; color: #7A2E5C; margin-top: 6px; }
-button { border-radius: 22px !important; }
-[data-testid="stMetric"] { background: #FFFFFF; border: 1px solid #F3C6D6; border-radius: 16px;
-                           padding: 12px 18px; box-shadow: 0 2px 8px rgba(194, 24, 91, 0.08); }
-[data-testid="stExpander"] { background: #FFFFFF; border: 1px solid #F3C6D6 !important; border-radius: 16px; }
+.stApp { background: linear-gradient(180deg, #F5FAFA 0%, #EAF4F6 100%); }
+h1, h2, h3, h4, h5 { color: #0B4F55 !important; }
+.mc-hero { background: linear-gradient(120deg, #D9EFEE 0%, #DCE8F6 100%); border: 1px solid #BCD6D9;
+           border-left: 6px solid #0F766E; border-radius: 14px; padding: 22px 30px; margin: 0 0 14px 0;
+           box-shadow: 0 3px 12px rgba(11, 79, 85, 0.10); }
+.mc-hero-title { font-size: 2.2rem; font-weight: 700; color: #0B4F55; line-height: 1.2; }
+.mc-hero-sub { font-size: 1.05rem; color: #31565C; margin-top: 6px; }
+button { border-radius: 10px !important; }
+[data-testid="stMetric"] { background: #FFFFFF; border: 1px solid #CFE3E5; border-radius: 12px;
+                           padding: 12px 18px; box-shadow: 0 2px 8px rgba(11, 79, 85, 0.08); }
+[data-testid="stExpander"] { background: #FFFFFF; border: 1px solid #CFE3E5 !important; border-radius: 12px; }
 section[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"],
 [data-testid="collapsedControl"] { display: none !important; }
 
-/* ---- assessment ---- */
-.stApp h2 { font-family: 'Fraunces', Georgia, 'Times New Roman', serif !important; font-weight: 700 !important; }
-.mc-hbanner, .mc-cell, .mc-panel { font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
-.mc-hbanner { border: 1px solid; border-radius: 14px; overflow: hidden; margin: 0 0 16px 0; box-shadow: 0 3px 12px rgba(74, 29, 63, 0.10); }
+/* ---- assessment (inherits the page font so it matches the other sections) ---- */
+.mc-hbanner, .mc-cell, .mc-panel { font-family: inherit; }
+.mc-hbanner { border: 1px solid; border-radius: 12px; overflow: hidden; margin: 0 0 16px 0; box-shadow: 0 3px 12px rgba(11, 79, 85, 0.10); }
 .mc-hbanner-top { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 18px;
                   padding: 14px 22px; color: #FFFFFF; }
-.mc-hbanner-title { font-family: 'Fraunces', Georgia, serif; font-size: 1.45rem; font-weight: 700; letter-spacing: 0.1px; }
+.mc-hbanner-title { font-size: 1.45rem; font-weight: 700; letter-spacing: 0.1px; }
 .mc-hbanner-level { font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; white-space: nowrap; }
 .mc-seg { display: inline-block; width: 24px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.35); margin-left: 5px; }
 .mc-seg.on { background: #FFFFFF; }
 .mc-seg-label { margin-right: 6px; }
-.mc-hbanner-body { padding: 14px 22px 16px 22px; color: #2E1A2B; line-height: 1.6; font-size: 0.98rem; }
+.mc-hbanner-body { padding: 14px 22px 16px 22px; color: #17323A; line-height: 1.6; font-size: 0.98rem; }
 .mc-hbanner-body div + div { margin-top: 4px; }
 .mc-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin: 0 0 16px 0; }
-.mc-cell { border: 1px solid #E8C9D8; border-top-width: 4px; border-radius: 12px; padding: 14px 18px 16px 18px;
-           box-shadow: 0 2px 8px rgba(74, 29, 63, 0.07); }
-.mc-cell-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #7A4A6A; }
-.mc-cell-value { font-family: 'Fraunces', Georgia, serif; font-size: 1.75rem; font-weight: 700; line-height: 1.2; margin-top: 6px; }
-.mc-cell-sub { font-size: 0.85rem; color: #6B5568; margin-top: 4px; }
-.mc-panel { background: #FFFFFF; border: 1px solid #E8C9D8; border-radius: 14px; margin: 0 0 16px 0; overflow: hidden;
-            box-shadow: 0 2px 10px rgba(74, 29, 63, 0.07); }
+.mc-cell { border: 1px solid #CFE3E5; border-top-width: 4px; border-radius: 10px; padding: 14px 18px 16px 18px;
+           box-shadow: 0 2px 8px rgba(11, 79, 85, 0.07); }
+.mc-cell-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #4F6F75; }
+.mc-cell-value { font-size: 1.75rem; font-weight: 700; line-height: 1.2; margin-top: 6px; }
+.mc-cell-sub { font-size: 0.85rem; color: #5B7479; margin-top: 4px; }
+.mc-panel { background: #FFFFFF; border: 1px solid #CFE3E5; border-radius: 12px; margin: 0 0 16px 0; overflow: hidden;
+            box-shadow: 0 2px 10px rgba(11, 79, 85, 0.07); }
 .mc-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 18px;
-                 background: linear-gradient(90deg, #FBE9F1 0%, #F4EAFB 100%); border-bottom: 1px solid #E8C9D8;
-                 border-left: 5px solid #B02A6F; }
-.mc-panel-title { font-family: 'Fraunces', Georgia, serif; font-size: 1.1rem; font-weight: 700; color: #4A1D3F; }
-.mc-meta { background: #FFFFFF; border: 1px solid #E0BFD1; border-radius: 999px; padding: 2px 12px; font-size: 0.78rem;
-           font-weight: 600; color: #6B2A55; white-space: nowrap; }
-.mc-panel-body { padding: 16px 18px; color: #2E1A2B; font-size: 0.97rem; line-height: 1.6; }
-.mc-action { font-family: 'Fraunces', Georgia, serif; font-size: 1.3rem; font-weight: 700; color: #4A1D3F; line-height: 1.35; }
-.mc-when { display: inline-flex; align-items: center; gap: 10px; background: #FBEFF5; border: 1px solid #F0D3E1;
+                 background: linear-gradient(90deg, #E6F4F3 0%, #E8F0FA 100%); border-bottom: 1px solid #CFE3E5;
+                 border-left: 5px solid #0F766E; }
+.mc-panel-title { font-size: 1.1rem; font-weight: 700; color: #0B4F55; }
+.mc-meta { background: #FFFFFF; border: 1px solid #BCD6D9; border-radius: 999px; padding: 2px 12px; font-size: 0.78rem;
+           font-weight: 600; color: #0B4F55; white-space: nowrap; }
+.mc-panel-body { padding: 16px 18px; color: #17323A; font-size: 0.97rem; line-height: 1.6; }
+.mc-action { font-size: 1.3rem; font-weight: 700; color: #0B4F55; line-height: 1.35; }
+.mc-when { display: inline-flex; align-items: center; gap: 10px; background: #EAF5F5; border: 1px solid #CFE3E5;
            border-radius: 8px; padding: 6px 12px; margin-top: 12px; font-weight: 500; }
-.mc-when-label { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #9A2D66; }
-.mc-note { font-size: 0.84rem; color: #6B5568; margin-top: 12px; line-height: 1.5; }
+.mc-when-label { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #0F766E; }
+.mc-note { font-size: 0.84rem; color: #5B7479; margin-top: 12px; line-height: 1.5; }
 .mc-flag { border-left: 4px solid; border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; }
 .mc-flag:last-child { margin-bottom: 0; }
 .mc-flag-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
 .mc-flag-title { font-weight: 700; }
 .mc-flag-level { font-size: 0.78rem; font-weight: 700; white-space: nowrap; }
-.mc-flag-basis { font-size: 0.82rem; color: #6B5568; margin-top: 4px; }
+.mc-flag-basis { font-size: 0.82rem; color: #5B7479; margin-top: 4px; }
 .mc-bar-row { border-radius: 10px; padding: 8px 12px; margin-bottom: 6px; }
 .mc-bar-row:last-child { margin-bottom: 0; }
 .mc-bar-top { display: flex; justify-content: space-between; font-size: 0.95rem; margin-bottom: 6px; }
-.mc-bar-pct { font-family: 'Fraunces', Georgia, serif; font-weight: 700; font-size: 1.05rem; }
-.mc-track { background: #F3E3EC; border-radius: 6px; height: 10px; overflow: hidden; }
+.mc-bar-pct { font-weight: 700; font-size: 1.05rem; }
+.mc-track { background: #E1EEEF; border-radius: 6px; height: 10px; overflow: hidden; }
 .mc-fill { height: 100%; border-radius: 6px; }
 .mc-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
 .mc-table th { text-align: left; font-weight: 700; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase;
-               color: #7A4A6A; padding: 0 10px 8px 0; border-bottom: 2px solid #F0D3E1; }
-.mc-table td { padding: 10px 10px 10px 0; border-bottom: 1px solid #F6E8EF; color: #2E1A2B; vertical-align: middle; }
+               color: #4F6F75; padding: 0 10px 8px 0; border-bottom: 2px solid #CFE3E5; }
+.mc-table td { padding: 10px 10px 10px 0; border-bottom: 1px solid #E6F0F1; color: #17323A; vertical-align: middle; }
 .mc-table tr:last-child td { border-bottom: none; }
 .mc-shap-cell { display: flex; align-items: center; gap: 10px; }
-.mc-shap-track { flex: 1; background: #F6ECF2; border-radius: 5px; height: 8px; overflow: hidden; min-width: 60px; }
+.mc-shap-track { flex: 1; background: #E6F0F1; border-radius: 5px; height: 8px; overflow: hidden; min-width: 60px; }
 .mc-shap-fill { height: 100%; border-radius: 5px; }
 .mc-shap-num { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 44px; text-align: right; }
 .mc-summary { font-size: 1.02rem; line-height: 1.7; }
@@ -582,7 +580,7 @@ if _job:
 csv_path, _checked = find_dataset()
 
 if csv_path is None:
-    st.title("\U0001F930 MaternaCare AI")
+    st.title("\U0001FA7A MaternaCare AI")
     st.error("I could not find the Maternal Health Risk dataset.")
     st.markdown(
         f"I looked in `{os.path.join(ROOT, 'data')}` (and the rest of the project folder) for a CSV "
@@ -613,13 +611,16 @@ traj_clf, traj_eval = load_trajectory_model(csv_path)
 explainer = load_explainer(clf)
 
 st.markdown(
-    '<div class="mc-hero"><div class="mc-hero-title">\U0001F338 MaternaCare AI</div></div>',
+    '<div class="mc-hero"><div class="mc-hero-title">\U0001FA7A MaternaCare AI</div>'
+    '<div class="mc-hero-sub">AI-assisted maternal risk assessment and clinical decision support '
+    'for frontline health workers</div></div>',
     unsafe_allow_html=True)
 
 # ---- 1. vitals ------------------------------------------------------------
 st.subheader("1. Patient vitals")
 
-with st.expander("\U0001F3A4 Voice entry (optional)", expanded=False):
+st.markdown("#### Voice entry (optional)")
+with st.container(border=True):
     ready, reason = mic_status()
     if ready:
         st.checkbox("\U0001F50A Speak the questions aloud", key="spoken_prompts")
@@ -725,7 +726,7 @@ rec = generate_recommendation(
 )
 
 st.divider()
-st.header("Assessment")
+st.subheader("4. Assessment")
 
 prim = rec["primary_recommendation"]
 urg = rec["overall_urgency"]
@@ -748,8 +749,8 @@ st.markdown(_banner(headline, urg, _lines), unsafe_allow_html=True)
 _how_txt = how[:1].upper() + how[1:]
 st.markdown(_strip([
     ("Predicted risk level", risk_level, f"Model probability {probs[risk_level]:.0%}",
-     RISK_COLOR.get(risk_level, "#4A1D3F")),
-    ("Trajectory", rec["trajectory_pattern"], _how_txt, TRAJ_COLOR.get(rec["trajectory_pattern"], "#4A1D3F")),
+     RISK_COLOR.get(risk_level, "#12343B")),
+    ("Trajectory", rec["trajectory_pattern"], _how_txt, TRAJ_COLOR.get(rec["trajectory_pattern"], "#12343B")),
     ("Overall urgency", f"{urg} of 4", headline, ur_col),
 ]), unsafe_allow_html=True)
 
@@ -792,7 +793,7 @@ with left:
         st.markdown(_panel(
             "Anemia check",
             f'<div>{_e(a["action"])}</div><div class="mc-note">Basis: {_e(a["basis"])}</div>',
-            meta=a["tier"], meta_color=ANEMIA_COLOR.get(a["tier"], "#6B2A55")), unsafe_allow_html=True)
+            meta=a["tier"], meta_color=ANEMIA_COLOR.get(a["tier"], "#0B4F55")), unsafe_allow_html=True)
 
 with right:
     _bars = _bar_rows([(c, probs[c], RISK_COLOR[c], c == risk_level) for c in CLASS_ORDER])
@@ -804,15 +805,14 @@ with right:
         _trs = ""
         for feat, sv, val in top:
             up = sv > 0
-            _col = "#B02A6F" if up else "#2F5D9B"
+            _col = "#C2410C" if up else "#0F766E"
             _trs += (f'<tr><td><b>{_e(feat)}</b></td><td>{val:g}</td>'
                      f'<td style="color:{_col};font-weight:700;">{"Raises" if up else "Lowers"}</td>'
                      f'<td><div class="mc-shap-cell"><div class="mc-shap-track"><div class="mc-shap-fill" '
                      f'style="width:{abs(sv) / _max * 100:.0f}%;background:{_col};"></div></div>'
                      f'<span class="mc-shap-num">{sv:+.2f}</span></div></td></tr>')
         _body = ('<table class="mc-table"><tr><th>Vital</th><th>Value</th>'
-                 f'<th>Effect on {_e(risk_level)}</th><th>Contribution</th></tr>{_trs}</table>'
-                 '<div class="mc-note">SHAP shows how much each vital pushed the model towards this risk level.</div>')
+                 f'<th>Effect on {_e(risk_level)}</th><th>Contribution</th></tr>{_trs}</table>')
     else:
         _body = '<div class="mc-note">SHAP explanations are not available (the shap package is not installed).</div>'
     st.markdown(_panel("Why this risk level", _body, meta="SHAP"), unsafe_allow_html=True)
@@ -820,7 +820,9 @@ with right:
 st.markdown(_panel("Summary for the health worker", f'<div class="mc-summary">{_e(rec["explanation"])}</div>'),
             unsafe_allow_html=True)
 
-with st.expander(f"How the trajectory was decided ({how})"):
+st.markdown("#### How the trajectory was decided")
+st.caption(how[:1].upper() + how[1:] + ".")
+with st.container(border=True):
     if traj_probs:
         _labels = [f"Previous visit {i + 1}" for i in range(len(prev_visits))] + ["Current visit"]
         st.dataframe(pd.DataFrame(prev_visits + [current], index=_labels)[
@@ -874,7 +876,7 @@ report_data = {
     "shap": top,
 }
 
-b1, b2, b3 = st.columns(3)
+b1, b2 = st.columns(2)
 with b1:
     if REPORT_OK:
         try:
@@ -896,9 +898,4 @@ with b2:
             st.audio(wav, format="audio/wav", autoplay=True)
         else:
             st.warning("Offline text-to-speech is not available on this computer.")
-with b3:
-    st.download_button("\u2B07\uFE0F Download data (JSON)",
-                       json.dumps({k: v for k, v in report_data.items() if k not in ("patient_label", "health_worker")},
-                                  indent=2, default=str),
-                       file_name="maternacare_assessment.json", mime="application/json", key="dl_json")
 st.caption("Open the downloaded PDF and print it, or save it to the patient's file.")
